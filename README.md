@@ -1,2 +1,3 @@
-# MiseOS-MCP-Foundry
-is on the pass — a kitchen control plane for composing micro-agents, binding MCP tools, and packaging plugins.
+# MiseOS MCP Foundry
+
+Kitchen control plane for micro-agents, gated copilot, and the capability gateway.
