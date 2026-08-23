@@ -1,0 +1,8 @@
+{
+  "name": "miseos-mcp-foundry",
+  "version": "0.1.0",
+  "description": "MiseOS MCP Foundry — gated copilot, repo steward, and capability gateway for GitHub.",
+  "author": {
+    "name": "Mise OS Brigade"
+  }
+}
