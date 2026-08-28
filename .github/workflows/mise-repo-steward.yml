@@ -1,0 +1,542 @@
+name: Mise Repo Steward
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Which steward action to run
+        required: true
+        type: choice
+        options:
+          - issues-review
+          - merge-pr
+          - branch-corrections
+          - comments-commits
+          - repo-clean
+      target_number:
+        description: Optional issue or PR number
+        required: false
+        type: string
+      apply_changes:
+        description: Actually push/merge/delete safe generated changes
+        required: false
+        type: boolean
+        default: false
+  issue_comment:
+    types: [created]
+  issues:
+    types: [opened, reopened, edited, labeled]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  schedule:
+    - cron: "17 9 * * 1,4"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mise-repo-steward-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  route:
+    name: Route Mise command
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      mode: ${{ steps.route.outputs.mode }}
+      target_number: ${{ steps.route.outputs.target_number }}
+      apply_changes: ${{ steps.route.outputs.apply_changes }}
+    steps:
+      - name: Resolve command mode
+        id: route
+        run: |
+          set -euo pipefail
+
+          EVENT_NAME="${{ github.event_name }}"
+          MODE="${{ inputs.mode || '' }}"
+          TARGET_NUMBER="${{ inputs.target_number || '' }}"
+          APPLY_CHANGES="${{ inputs.apply_changes || false }}"
+
+          COMMENT_BODY="$(jq -r '.comment.body // ""' "$GITHUB_EVENT_PATH")"
+          AUTHOR_ASSOC="$(jq -r '.comment.author_association // ""' "$GITHUB_EVENT_PATH")"
+          ISSUE_NUMBER="$(jq -r '.issue.number // ""' "$GITHUB_EVENT_PATH")"
+          PR_NUMBER="$(jq -r '.pull_request.number // ""' "$GITHUB_EVENT_PATH")"
+
+          if [[ -z "$TARGET_NUMBER" && -n "$PR_NUMBER" ]]; then TARGET_NUMBER="$PR_NUMBER"; fi
+          if [[ -z "$TARGET_NUMBER" && -n "$ISSUE_NUMBER" ]]; then TARGET_NUMBER="$ISSUE_NUMBER"; fi
+
+          if [[ "$EVENT_NAME" == "issue_comment" ]]; then
+            case "$AUTHOR_ASSOC" in
+              OWNER|MEMBER|COLLABORATOR) ;;
+              *)
+                echo "mode=none" >> "$GITHUB_OUTPUT"
+                echo "target_number=$TARGET_NUMBER" >> "$GITHUB_OUTPUT"
+                echo "apply_changes=false" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+            esac
+
+            BODY_LOWER="$(printf '%s' "$COMMENT_BODY" | tr '[:upper:]' '[:lower:]')"
+
+            case "$BODY_LOWER" in
+              *"/mise issue-review"*|*"/mise review"*|*"/mise triage"*) MODE="issues-review" ;;
+              *"/mise merge-pr"*|*"/mise merge"*) MODE="merge-pr" ;;
+              *"/mise branch-correct"*|*"/mise branch-corrections"*|*"/mise suggest-branch"*) MODE="branch-corrections" ;;
+              *"/mise comments-commits"*|*"/mise commit-note"*|*"/mise digest"*) MODE="comments-commits" ;;
+              *"/mise repo-clean"*|*"/mise clean"*) MODE="repo-clean" ;;
+              *) MODE="none" ;;
+            esac
+
+            if printf '%s' "$BODY_LOWER" | grep -Eq '(^|[[:space:]])apply([[:space:]]|$)'; then
+              APPLY_CHANGES="true"
+            else
+              APPLY_CHANGES="false"
+            fi
+          fi
+
+          if [[ -z "$MODE" ]]; then
+            case "$EVENT_NAME" in
+              pull_request|issues) MODE="issues-review" ;;
+              schedule) MODE="repo-clean" ;;
+              *) MODE="none" ;;
+            esac
+          fi
+
+          case "$MODE" in
+            issues-review|merge-pr|branch-corrections|comments-commits|repo-clean|none) ;;
+            *) MODE="none" ;;
+          esac
+
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "target_number=$TARGET_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "apply_changes=$APPLY_CHANGES" >> "$GITHUB_OUTPUT"
+
+  issues_review:
+    name: 01 Issues and review steward
+    needs: route
+    if: needs.route.outputs.mode == 'issues-review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_API_TOKEN: ${{ github.token }}
+      AUGMENT_SESSION_AUTH: ${{ secrets.AUGMENT_SESSION_AUTH }}
+      TARGET_NUMBER: ${{ needs.route.outputs.target_number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Generate repo review report
+        run: |
+          set +e
+          REPORT="MISE_ISSUES_REVIEW.md"
+          : > "$REPORT"
+          {
+            echo "# Mise Issues & Review Steward"
+            echo
+            echo "Repository: $GITHUB_REPOSITORY"
+            echo "Event: ${{ github.event_name }}"
+            echo "Target: ${TARGET_NUMBER:-repository}"
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            echo "## Build gate"
+          } >> "$REPORT"
+
+          if [[ -f package-lock.json ]]; then npm ci >> "$REPORT" 2>&1; else npm install >> "$REPORT" 2>&1; fi
+
+          run_gate() {
+            local label="$1"
+            shift
+            echo "### $label" >> "$REPORT"
+            "$@" >> "$REPORT" 2>&1
+            local code=$?
+            if [[ $code -eq 0 ]]; then
+              echo "✅ $label passed" >> "$REPORT"
+            else
+              echo "❌ $label failed with exit code $code" >> "$REPORT"
+            fi
+            echo >> "$REPORT"
+            return 0
+          }
+
+          run_gate "typecheck" npm run typecheck --if-present
+          run_gate "test" npm test --if-present
+          run_gate "build" npm run build --if-present
+          run_gate "lint" npm run lint --if-present
+
+          {
+            echo "## Git signal"
+            echo '```text'
+            git status --short
+            git log --oneline --decorate -n 12
+            echo '```'
+          } >> "$REPORT"
+
+          if [[ -n "${AUGMENT_SESSION_AUTH:-}" ]]; then
+            npm install -g @augmentcode/auggie >/dev/null 2>&1
+            {
+              echo "Review this repository status as a Mise repo steward."
+              echo "Focus on issues, PR risks, test failures, branch flow, and next precise action."
+              echo "Return concise markdown with: Verdict, Risks, Commands, Next Branch."
+              echo
+              cat "$REPORT"
+            } | auggie --print --compact --max-turns 6 > MISE_AGENT_REPORT.md 2>/tmp/auggie.err || cp "$REPORT" MISE_AGENT_REPORT.md
+          else
+            cp "$REPORT" MISE_AGENT_REPORT.md
+          fi
+
+      - name: Comment report on issue or PR
+        if: env.TARGET_NUMBER != ''
+        run: |
+          set -euo pipefail
+          gh issue comment "$TARGET_NUMBER" --body-file MISE_AGENT_REPORT.md
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mise-issues-review
+          path: MISE_AGENT_REPORT.md
+
+  merge_pr:
+    name: 02 Merge and PR steward
+    needs: route
+    if: needs.route.outputs.mode == 'merge-pr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_NUMBER: ${{ needs.route.outputs.target_number }}
+      APPLY_CHANGES: ${{ needs.route.outputs.apply_changes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Validate and merge PR only when gated
+        run: |
+          set -euo pipefail
+          if [[ -z "${TARGET_NUMBER:-}" ]]; then
+            echo "merge-pr requires target_number or a PR comment command." >&2
+            exit 1
+          fi
+
+          IS_DRAFT="$(gh pr view "$TARGET_NUMBER" --json isDraft -q '.isDraft')"
+          if [[ "$IS_DRAFT" == "true" ]]; then
+            gh pr comment "$TARGET_NUMBER" --body "Mise merge blocked: PR is still draft."
+            exit 1
+          fi
+
+          gh pr checkout "$TARGET_NUMBER"
+          if [[ -f package-lock.json ]]; then npm ci; else npm install; fi
+          npm run typecheck --if-present
+          npm test --if-present
+          npm run build --if-present
+          npm run lint --if-present
+
+          PR_URL="$(gh pr view "$TARGET_NUMBER" --json url -q '.url')"
+          HEAD_BRANCH="$(gh pr view "$TARGET_NUMBER" --json headRefName -q '.headRefName')"
+          BASE_BRANCH="$(gh pr view "$TARGET_NUMBER" --json baseRefName -q '.baseRefName')"
+
+          cat > MISE_MERGE_PLAN.md <<EOF
+          # Mise Merge Plan
+
+          PR: $PR_URL
+          Head: $HEAD_BRANCH
+          Base: $BASE_BRANCH
+
+          Gates completed:
+          - npm install/ci
+          - npm run typecheck --if-present
+          - npm test --if-present
+          - npm run build --if-present
+          - npm run lint --if-present
+
+          Local merge command:
+          \`gh pr merge $TARGET_NUMBER --squash --delete-branch --auto\`
+          EOF
+
+          if [[ "$APPLY_CHANGES" != "true" ]]; then
+            gh pr comment "$TARGET_NUMBER" --body-file MISE_MERGE_PLAN.md
+            echo "Dry-run only. Add 'apply' to the /mise merge-pr command or set apply_changes=true."
+            exit 0
+          fi
+
+          gh pr comment "$TARGET_NUMBER" --body-file MISE_MERGE_PLAN.md
+          gh pr merge "$TARGET_NUMBER" --squash --delete-branch --auto
+
+  branch_corrections:
+    name: 03 Branch corrections and suggestions
+    needs: route
+    if: needs.route.outputs.mode == 'branch-corrections'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_NUMBER: ${{ needs.route.outputs.target_number }}
+      APPLY_CHANGES: ${{ needs.route.outputs.apply_changes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build branch-flow correction report
+        run: |
+          set -euo pipefail
+          git fetch --all --prune
+          DEFAULT_BRANCH="$(gh repo view --json defaultBranchRef -q '.defaultBranchRef.name')"
+          REPORT="MISE_BRANCH_FLOW.md"
+
+          {
+            echo "# Mise Branch Flow Corrections"
+            echo
+            echo "Default branch: $DEFAULT_BRANCH"
+            echo "Generated: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo
+            echo "## Recommended branch order"
+            echo
+            echo "| Branch | Ahead | Behind | Recommendation | Git command |"
+            echo "|---|---:|---:|---|---|"
+          } > "$REPORT"
+
+          git for-each-ref refs/remotes/origin --format='%(refname:short)' \
+            | sed 's#^origin/##' \
+            | grep -v '^HEAD$' \
+            | sort \
+            | while read -r branch; do
+                if [[ "$branch" == "$DEFAULT_BRANCH" ]]; then
+                  echo "| $branch | 0 | 0 | Base branch. Protect this. | \`git checkout $DEFAULT_BRANCH && git pull --ff-only\` |" >> "$REPORT"
+                  continue
+                fi
+                ahead="$(git rev-list --count "origin/$DEFAULT_BRANCH..origin/$branch" 2>/dev/null || echo 0)"
+                behind="$(git rev-list --count "origin/$branch..origin/$DEFAULT_BRANCH" 2>/dev/null || echo 0)"
+                if [[ "$ahead" == "0" && "$behind" != "0" ]]; then
+                  rec="No unique commits; archive/delete candidate after confirmation."
+                  cmd="git push origin --delete $branch"
+                elif [[ "$ahead" != "0" && "$behind" != "0" ]]; then
+                  rec="Rebase/update from $DEFAULT_BRANCH before PR."
+                  cmd="git checkout $branch && git fetch origin && git rebase origin/$DEFAULT_BRANCH"
+                elif [[ "$ahead" != "0" && "$behind" == "0" ]]; then
+                  rec="PR candidate; review next."
+                  cmd="gh pr create --base $DEFAULT_BRANCH --head $branch"
+                else
+                  rec="Already aligned."
+                  cmd="git checkout $branch && git pull --ff-only"
+                fi
+                echo "| $branch | $ahead | $behind | $rec | \`$cmd\` |" >> "$REPORT"
+              done
+
+          cat >> "$REPORT" <<EOF
+
+          ## Steward rule
+
+          Merge next branch by evidence, not vibes:
+          1. Smallest passing PR that unlocks build/test stability.
+          2. Branch ahead of default and not behind default.
+          3. Branch with docs/tests before feature-only branch.
+          4. No merge when typecheck/test/build fails.
+          EOF
+
+          if [[ -n "${TARGET_NUMBER:-}" ]]; then
+            gh issue comment "$TARGET_NUMBER" --body-file "$REPORT"
+          else
+            EXISTING="$(gh issue list --state open --search 'Mise Branch Flow Corrections in:title' --json number -q '.[0].number // empty')"
+            if [[ -n "$EXISTING" ]]; then
+              gh issue comment "$EXISTING" --body-file "$REPORT"
+            else
+              gh issue create --title "Mise Branch Flow Corrections" --body-file "$REPORT" --label "mise:steward" || gh issue create --title "Mise Branch Flow Corrections" --body-file "$REPORT"
+            fi
+          fi
+
+      - name: Commit branch-flow report as PR when apply=true
+        if: env.APPLY_CHANGES == 'true'
+        run: |
+          set -euo pipefail
+          DEFAULT_BRANCH="$(gh repo view --json defaultBranchRef -q '.defaultBranchRef.name')"
+          STEWARD_BRANCH="mise/steward/branch-flow-${GITHUB_RUN_ID}"
+          git config user.name "mise-repo-steward[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$STEWARD_BRANCH"
+          mkdir -p docs
+          cp MISE_BRANCH_FLOW.md docs/MISE_BRANCH_FLOW.md
+          git add docs/MISE_BRANCH_FLOW.md
+          git commit -m "docs: add Mise branch flow report [skip ci]" || exit 0
+          git push -u origin "$STEWARD_BRANCH"
+          gh pr create --base "$DEFAULT_BRANCH" --head "$STEWARD_BRANCH" --title "docs: Mise branch flow stewardship report" --body-file MISE_BRANCH_FLOW.md || true
+
+  comments_commits:
+    name: 04 Comments and commits steward
+    needs: route
+    if: needs.route.outputs.mode == 'comments-commits'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_NUMBER: ${{ needs.route.outputs.target_number }}
+      APPLY_CHANGES: ${{ needs.route.outputs.apply_changes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build comment and commit digest
+        run: |
+          set -euo pipefail
+          REPORT="MISE_COMMENTS_COMMITS.md"
+          {
+            echo "# Mise Comments & Commits Digest"
+            echo
+            echo "Generated: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo
+            echo "## Latest commits"
+            echo '```text'
+            git log --oneline --decorate -n 25
+            echo '```'
+            echo
+            echo "## Current working tree"
+            echo '```text'
+            git status --short
+            echo '```'
+          } > "$REPORT"
+
+          if [[ -n "${TARGET_NUMBER:-}" ]]; then
+            {
+              echo
+              echo "## GitHub conversation context"
+              gh issue view "$TARGET_NUMBER" --comments --json title,url,comments \
+                -q '"Title: " + .title + "\nURL: " + .url + "\n\nRecent comments:\n" + ([.comments[-5:][]? | "- " + .author.login + ": " + (.body | gsub("\n"; " ") | .[0:240])] | join("\n"))'
+            } >> "$REPORT"
+            gh issue comment "$TARGET_NUMBER" --body-file "$REPORT"
+          fi
+
+      - name: Commit digest as docs when apply=true
+        if: env.APPLY_CHANGES == 'true'
+        run: |
+          set -euo pipefail
+          DEFAULT_BRANCH="$(gh repo view --json defaultBranchRef -q '.defaultBranchRef.name')"
+          STEWARD_BRANCH="mise/steward/comments-commits-${GITHUB_RUN_ID}"
+          git config user.name "mise-repo-steward[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$STEWARD_BRANCH"
+          mkdir -p docs
+          cp MISE_COMMENTS_COMMITS.md docs/MISE_COMMENTS_COMMITS.md
+          git add docs/MISE_COMMENTS_COMMITS.md
+          git commit -m "docs: add Mise comments and commits digest [skip ci]" || exit 0
+          git push -u origin "$STEWARD_BRANCH"
+          gh pr create --base "$DEFAULT_BRANCH" --head "$STEWARD_BRANCH" --title "docs: Mise comments and commits digest" --body-file MISE_COMMENTS_COMMITS.md || true
+
+  repo_clean:
+    name: 05 Continuous repo cleanup steward
+    needs: route
+    if: needs.route.outputs.mode == 'repo-clean'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      APPLY_CHANGES: ${{ needs.route.outputs.apply_changes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clean safely and publish health report
+        run: |
+          set -euo pipefail
+          git fetch --all --prune
+          DEFAULT_BRANCH="$(gh repo view --json defaultBranchRef -q '.defaultBranchRef.name')"
+          REPORT="MISE_REPO_HEALTH.md"
+          NOW="$(date +%s)"
+          CUTOFF_DAYS="30"
+
+          {
+            echo "# Mise Repo Health Report"
+            echo
+            echo "Generated: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "Default branch: $DEFAULT_BRANCH"
+            echo "Apply changes: $APPLY_CHANGES"
+            echo
+            echo "## Open pull requests"
+            gh pr list --state open --json number,title,headRefName,baseRefName,updatedAt,url \
+              -q '.[] | "- #\(.number) \(.title) — \(.headRefName) -> \(.baseRefName) — \(.url)"' || true
+            echo
+            echo "## Safe cleanup candidates"
+            echo
+            echo "Only branches matching \`mise/steward/*\` are auto-delete candidates. Human branches are reported, not deleted."
+            echo
+          } > "$REPORT"
+
+          DELETED=0
+          git for-each-ref refs/remotes/origin/mise/steward --format='%(refname:short)' 2>/dev/null \
+            | sed 's#^origin/##' \
+            | while read -r branch; do
+                [[ -z "$branch" ]] && continue
+                last_ts="$(git log -1 --format=%ct "origin/$branch" 2>/dev/null || echo "$NOW")"
+                age_days="$(( (NOW - last_ts) / 86400 ))"
+                echo "- $branch — ${age_days}d old" >> "$REPORT"
+                if [[ "$APPLY_CHANGES" == "true" && "$age_days" -ge "$CUTOFF_DAYS" ]]; then
+                  git push origin --delete "$branch" || true
+                  DELETED=$((DELETED + 1))
+                fi
+              done
+
+          {
+            echo
+            echo "## Exact local cleanup commands"
+            echo '```bash'
+            echo "git fetch --all --prune"
+            echo "git checkout $DEFAULT_BRANCH && git pull --ff-only"
+            echo "git branch --merged $DEFAULT_BRANCH"
+            echo "git remote prune origin"
+            echo '```'
+          } >> "$REPORT"
+
+          if [[ "$APPLY_CHANGES" == "true" ]]; then
+            gh label create "mise:steward" --color "7057ff" --description "Mise repository stewardship automation" || true
+            gh label create "mise:needs-review" --color "fbca04" --description "Needs human review before merge" || true
+            gh label create "mise:branch-flow" --color "0e8a16" --description "Branch flow or merge-order recommendation" || true
+          fi
+
+          EXISTING="$(gh issue list --state open --search 'Mise Repo Health Report in:title' --json number -q '.[0].number // empty')"
+          if [[ -n "$EXISTING" ]]; then
+            gh issue comment "$EXISTING" --body-file "$REPORT"
+          else
+            gh issue create --title "Mise Repo Health Report" --body-file "$REPORT" --label "mise:steward" || gh issue create --title "Mise Repo Health Report" --body-file "$REPORT"
+          fi
