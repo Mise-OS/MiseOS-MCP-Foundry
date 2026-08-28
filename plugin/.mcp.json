@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "miseos-foundry": {
-      "command": "node",
-      "args": ["plugin/mcp/gateway.mjs"]
-    }
-  }
-}
