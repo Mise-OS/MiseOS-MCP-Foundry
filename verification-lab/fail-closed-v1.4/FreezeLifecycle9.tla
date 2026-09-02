@@ -19,7 +19,7 @@ Claim == [
 ]
 
 VARIABLE
-  \* @type: Str -> Seq([id: Str, ver: Int, proposition: Str, evaluation_status: Str, requirements_satisfied: Bool, authority: Str, supersedes: Int]);
+  \* @type: Str -> Seq({id: Str, ver: Int, proposition: Str, evaluation_status: Str, requirements_satisfied: Bool, authority: Str, supersedes: Int});
   claims
 VARIABLE
   \* @type: Str;
