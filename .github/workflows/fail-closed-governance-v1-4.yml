@@ -118,12 +118,12 @@ jobs:
           "$CEDAR" --version 2>&1 | tee logs/version.log
           "$CEDAR" check-parse --policies promotion.cedar 2>&1 | tee logs/parse.log
           "$CEDAR" authorize --policies promotion.cedar --entities entities.json --principal 'User::"ci"' --action 'Action::"promote"' --resource 'Claim::"pass"' -v 2>&1 | tee logs/allow.log
-          head -1 logs/allow.log | grep -qx 'ALLOW'
+          grep -qx 'ALLOW' logs/allow.log
           "$CEDAR" authorize --policies promotion.cedar --entities entities.json --principal 'User::"ci"' --action 'Action::"promote"' --resource 'Claim::"indeterminate"' -v 2>&1 | tee logs/deny.log
-          head -1 logs/deny.log | grep -qx 'DENY'
+          grep -qx 'DENY' logs/deny.log
           "$CEDAR" check-parse --policies promotion-error.cedar 2>&1 | tee logs/error-parse.log
           "$CEDAR" authorize --policies promotion-error.cedar --entities entities.json --principal 'User::"ci"' --action 'Action::"promote"' --resource 'Claim::"pass"' -v 2>&1 | tee logs/diagnostic.log
-          head -1 logs/diagnostic.log | grep -qx 'ALLOW'
+          grep -qx 'ALLOW' logs/diagnostic.log
           grep -qiE 'error|diagnostic_guard|erroring_forbid' logs/diagnostic.log
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
