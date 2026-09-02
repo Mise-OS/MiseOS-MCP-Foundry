@@ -119,7 +119,11 @@ jobs:
           "$CEDAR" check-parse --policies promotion.cedar 2>&1 | tee logs/parse.log
           "$CEDAR" authorize --policies promotion.cedar --entities entities.json --principal 'User::"ci"' --action 'Action::"promote"' --resource 'Claim::"pass"' -v 2>&1 | tee logs/allow.log
           grep -qx 'ALLOW' logs/allow.log
+          set +e
           "$CEDAR" authorize --policies promotion.cedar --entities entities.json --principal 'User::"ci"' --action 'Action::"promote"' --resource 'Claim::"indeterminate"' -v 2>&1 | tee logs/deny.log
+          DENY_RC=${PIPESTATUS[0]}
+          set -e
+          echo "cedar_authorize_exit=$DENY_RC" | tee logs/deny-exit.txt
           grep -qx 'DENY' logs/deny.log
           "$CEDAR" check-parse --policies promotion-error.cedar 2>&1 | tee logs/error-parse.log
           "$CEDAR" authorize --policies promotion-error.cedar --entities entities.json --principal 'User::"ci"' --action 'Action::"promote"' --resource 'Claim::"pass"' -v 2>&1 | tee logs/diagnostic.log
