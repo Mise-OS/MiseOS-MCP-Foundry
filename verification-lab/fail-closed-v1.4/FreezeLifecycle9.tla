@@ -18,7 +18,12 @@ Claim == [
   supersedes: 0..MaxVer
 ]
 
-VARIABLES claims, active
+VARIABLE
+  \* @type: Str -> Seq([id: Str, ver: Int, proposition: Str, evaluation_status: Str, requirements_satisfied: Bool, authority: Str, supersedes: Int]);
+  claims
+VARIABLE
+  \* @type: Str;
+  active
 vars == <<claims, active>>
 
 SafeAuthority(c) ==
