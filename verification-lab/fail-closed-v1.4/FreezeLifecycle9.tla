@@ -8,6 +8,9 @@ MaxVer == 3
 Eval == {"pass", "fail", "indeterminate"}
 Auth == {"allow", "deny", "deny_promotion", "unsupported", "historical_only", "reported_only"}
 
+\* @typeAlias: claimRec = {id: Str, ver: Int, proposition: Str, evaluation_status: Str, requirements_satisfied: Bool, authority: Str, supersedes: Int};
+typeAliases == TRUE
+
 Claim == [
   id: ClaimIds,
   ver: 1..MaxVer,
@@ -19,18 +22,20 @@ Claim == [
 ]
 
 VARIABLE
-  \* @type: Str -> Seq({id: Str, ver: Int, proposition: Str, evaluation_status: Str, requirements_satisfied: Bool, authority: Str, supersedes: Int});
+  \* @type: Str -> Seq($claimRec);
   claims
 VARIABLE
   \* @type: Str;
   active
 vars == <<claims, active>>
 
+\* @type: ($claimRec) => Bool;
 SafeAuthority(c) ==
   /\ (c.authority = "allow" => /\ c.evaluation_status = "pass" /\ c.requirements_satisfied = TRUE)
   /\ (c.evaluation_status = "indeterminate" => c.authority # "allow")
   /\ (c.evaluation_status = "fail" => c.authority # "allow")
 
+\* @type: Str => $claimRec;
 Seed(id) ==
   [ id |-> id,
     ver |-> 1,
@@ -66,6 +71,7 @@ Init ==
   /\ active \in ClaimIds
   /\ \A id \in ClaimIds: SafeAuthority(Seed(id))
 
+\* @type: (Str, Str, Bool, Str) => Bool;
 CreateSuccessor(id, eval, req, auth) ==
   /\ id = active
   /\ Len(claims[id]) < MaxVer
