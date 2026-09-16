@@ -2,13 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { EphemeralCardMemoryStore, CardMemoryPolicyError } from "../mcp/card-memory.mjs";
-import { EvidenceReceiptChain } from "../mcp/evidence-receipts.mjs";
 import { createDeveloperBot } from "../mcp/developer-bot-core.mjs";
 
-function fakeClient() {
+function fakeClient(observed = []) {
   let counter = 0;
   return {
     async chat({ messages }) {
+      observed.push(messages);
       counter += 1;
       const system = messages[0]?.content ?? "";
       const card = /You are ([^,]+)/.exec(system)?.[1] ?? `Card ${counter}`;
@@ -31,7 +31,6 @@ test("card memory is one-hop scoped and purgable", () => {
     content: "bounded architecture handoff",
     shareWith: ["mise-garde"],
   });
-
   assert.equal(memory.read({ runId: "run_1", requesterCardId: "mise-maestro", memoryId: ref.id }).content, "bounded architecture handoff");
   assert.equal(memory.read({ runId: "run_1", requesterCardId: "mise-garde", memoryId: ref.id }).content, "bounded architecture handoff");
   assert.throws(
@@ -55,53 +54,19 @@ test("card memory rejects secret-like material before a handoff", () => {
   );
 });
 
-test("evidence receipts are hash chained and HMAC-verifiable", () => {
-  const chain = new EvidenceReceiptChain({ signingKey: "test-signing-key-32-bytes-minimum" });
-  const receipts = [];
-  chain.append(receipts, {
-    runId: "team_1",
-    fromCardId: "mise-maestro",
-    toCardId: "mise-garde",
-    memoryId: "mem_1",
-    requestedModel: "openrouter/free",
-    servedModel: "example/model:free",
-    input: "task capsule",
-    output: "architecture handoff",
-  });
-  chain.append(receipts, {
-    runId: "team_1",
-    fromCardId: "mise-garde",
-    toCardId: "mise-apprentice",
-    memoryId: "mem_2",
-    requestedModel: "openrouter/free",
-    servedModel: "example/model:free",
-    input: "architecture handoff",
-    output: "review handoff",
-  });
-
-  assert.equal(chain.verify(receipts), true);
-  assert.equal(receipts[1].previousReceiptHash, receipts[0].receiptHash);
-  const tampered = receipts.map((item) => ({ ...item }));
-  tampered[0].outputBytes += 1;
-  assert.equal(chain.verify(tampered), false);
-});
-
-test("default card team isolates context per hop and purges ephemeral memory", async () => {
+test("default card team uses cryptographic one-hop delegation and purges ephemeral memory", async () => {
   const memory = new EphemeralCardMemoryStore();
-  const bot = createDeveloperBot({
-    client: fakeClient(),
-    teamOptions: {
-      memory,
-      receipts: new EvidenceReceiptChain({ signingKey: "team-test-signing-key" }),
-    },
-  });
-
+  const observed = [];
+  const bot = createDeveloperBot({ client: fakeClient(observed), teamOptions: { memory } });
   const result = await bot.runTeam({
     prompt: "Harden the MCP mutation path",
     context: { invariant: "model output never grants authority" },
   });
 
+  assert.equal(result.schema, "miseos.card-team.run.v2");
   assert.deepEqual(result.team, ["mise-maestro", "mise-garde", "mise-apprentice", "mise-sommelier"]);
+  assert.equal(result.identityModel, "Ed25519 workload identities");
+  assert.equal(result.delegationModel, "one-hop controller-signed capability tokens");
   assert.equal(result.stages.length, 4);
   assert.equal(result.receipts.length, 4);
   assert.equal(result.receiptChainValid, true);
@@ -109,19 +74,22 @@ test("default card team isolates context per hop and purges ephemeral memory", a
   assert.equal(result.writeAuthority, "none");
   assert.equal(result.memoryRetention, "ephemeral-purged-after-run");
   assert.equal(memory.size(), 0);
-  assert.equal(result.stages[0].delegatedTo, "mise-garde");
-  assert.equal(result.stages[1].delegatedTo, "mise-apprentice");
-  assert.equal(result.stages[2].delegatedTo, "mise-sommelier");
-  assert.equal(result.stages[3].delegatedTo, "human-pass");
+  assert.deepEqual(result.stages.map((stage) => stage.delegatedTo), ["mise-garde", "mise-apprentice", "mise-sommelier", "human-pass"]);
+  assert.equal(new Set(result.workloadIdentities.map((identity) => identity.keyId)).size, 4);
+  assert.ok(result.receipts.every((receipt) => receipt.signatureAlgorithm === "Ed25519"));
+  assert.ok(result.receipts.every((receipt) => receipt.capabilityToken && receipt.capabilityTokenHash));
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE KEY/);
+
+  const modelView = JSON.stringify(observed);
+  assert.doesNotMatch(modelView, /MISEOS-DELEGATION/);
+  assert.doesNotMatch(modelView, /workload:\/\/miseos/);
+  assert.doesNotMatch(modelView, /cap_[0-9a-f-]{8,}/i);
 });
 
 test("cyclic or duplicate card teams fail closed", async () => {
   const bot = createDeveloperBot({ client: fakeClient() });
   await assert.rejects(
-    () => bot.runTeam({
-      prompt: "test",
-      team: ["mise-maestro", "mise-garde", "mise-maestro"],
-    }),
+    () => bot.runTeam({ prompt: "test", team: ["mise-maestro", "mise-garde", "mise-maestro"] }),
     /duplicate cards/,
   );
 });
