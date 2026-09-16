@@ -1,0 +1,33 @@
+name: Publication PASS Gate
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/publication-pass-gate.yml
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  audit:
+    uses: DeontewattsV1/AGI-CP/.github/workflows/full-history-secret-audit-reusable.yml@74223bfe9f44408e2db62496b48b67bf531f7d1e
+  publish-transition-status:
+    needs: audit
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUDIT_RESULT: ${{ needs.audit.result }}
+        run: |
+          set -euo pipefail
+          context='publication-gate/full-history-secret-audit'
+          if [ "$AUDIT_RESULT" = 'success' ]; then state='success'; description='PASS: full-history secret audit completed cleanly'; else state='failure'; description='BLOCKED: audit failed, incomplete, or found secrets'; fi
+          gh api --method POST -H 'Accept: application/vnd.github+json' "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" -f state="$state" -f context="$context" -f description="$description"
+          [ "$state" = 'success' ]

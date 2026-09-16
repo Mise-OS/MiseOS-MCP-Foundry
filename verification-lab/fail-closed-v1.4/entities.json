@@ -1,0 +1,5 @@
+[
+  {"uid":{"type":"User","id":"ci"},"attrs":{},"parents":[]},
+  {"uid":{"type":"Claim","id":"pass"},"attrs":{"evaluation_status":"pass","requirements_satisfied":true},"parents":[]},
+  {"uid":{"type":"Claim","id":"indeterminate"},"attrs":{"evaluation_status":"indeterminate","requirements_satisfied":false},"parents":[]}
+]
