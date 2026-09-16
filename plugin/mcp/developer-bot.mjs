@@ -17,7 +17,8 @@ function textResult(value, isError = false) {
 }
 
 async function reply(message) {
-  const id = message.id ?? 0;
+  if (!Object.prototype.hasOwnProperty.call(message, "id")) return;
+  const id = message.id;
 
   if (message.method === "initialize") {
     send({
@@ -119,22 +120,12 @@ async function reply(message) {
         return;
       }
       if (name === "miseos_dev_chat") {
-        const result = await bot.chat({
-          cardId: args.cardId,
-          prompt: args.prompt,
-          context: args.context,
-          model: args.model,
-        });
+        const result = await bot.chat({ cardId: args.cardId, prompt: args.prompt, context: args.context, model: args.model });
         send({ jsonrpc: "2.0", id, result: textResult(result) });
         return;
       }
       if (name === "miseos_team_run") {
-        const result = await bot.runTeam({
-          prompt: args.prompt,
-          context: args.context,
-          team: args.team,
-          model: args.model,
-        });
+        const result = await bot.runTeam({ prompt: args.prompt, context: args.context, team: args.team, model: args.model });
         send({ jsonrpc: "2.0", id, result: textResult(result) });
         return;
       }
@@ -142,16 +133,13 @@ async function reply(message) {
       send({
         jsonrpc: "2.0",
         id,
-        result: textResult(
-          {
-            error: error?.name || "Error",
-            message: error?.message || String(error),
-            freeOnly: true,
-            authority: "advisory",
-            writeAuthority: "none",
-          },
-          true,
-        ),
+        result: textResult({
+          error: error?.name || "Error",
+          message: error?.message || String(error),
+          freeOnly: true,
+          authority: "advisory",
+          writeAuthority: "none",
+        }, true),
       });
       return;
     }
