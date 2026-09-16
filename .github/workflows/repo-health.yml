@@ -25,3 +25,7 @@ jobs:
           test -f .github/workflows/mise-repo-steward.yml
           test -d src
           test -d plugin
+      - name: Validate MCP JavaScript syntax
+        run: node --check plugin/mcp/gateway.mjs && node --check plugin/mcp/developer-bot.mjs && node --check plugin/mcp/developer-bot-core.mjs && node --check plugin/mcp/openrouter-client.mjs && node --check plugin/mcp/character-cards.mjs
+      - name: Test OpenRouter free developer bot
+        run: node --test plugin/tests/*.test.mjs
