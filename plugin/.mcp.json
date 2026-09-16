@@ -2,11 +2,11 @@
   "mcpServers": {
     "miseos-foundry": {
       "command": "node",
-      "args": ["plugin/mcp/gateway.mjs"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/gateway.mjs"]
     },
     "miseos-developer-bot": {
       "command": "node",
-      "args": ["plugin/mcp/developer-bot.mjs"],
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/developer-bot.mjs"],
       "env": {
         "OPENROUTER_MODEL": "openrouter/free",
         "OPENROUTER_APP_NAME": "MiseOS Free Developer Bot",
