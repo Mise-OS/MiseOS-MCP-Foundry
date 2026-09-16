@@ -109,7 +109,6 @@ export class OpenRouterFreeClient {
     if (signal?.aborted) forwardAbort();
     else signal?.addEventListener?.("abort", forwardAbort, { once: true });
     const timer = setTimeout(() => controller.abort(new Error("OpenRouter request timed out.")), this.requestTimeoutMs);
-    timer.unref?.();
 
     try {
       const response = await this.fetchImpl(OPENROUTER_CHAT_URL, {
