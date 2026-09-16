@@ -1,0 +1,136 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CapabilityGatewayCycle",
+  "description": "Audit record for one decision cycle of the MiseOS Capability Gateway. Unknown quantities stay null — never invent returns, ruin, or balances.",
+  "type": "object",
+  "required": [
+    "schema",
+    "frozen",
+    "approved",
+    "autoPush",
+    "capabilities_evaluated",
+    "capabilities_rejected",
+    "capabilities_selected",
+    "capabilities_held",
+    "writes_at_risk",
+    "evidence_tiers",
+    "topology_claims",
+    "causal_claims",
+    "audit_events",
+    "data_retention_actions",
+    "next_action"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "miseos.capability-gateway.cycle.v1" },
+    "frozen": { "type": "boolean" },
+    "approved": { "type": "boolean" },
+    "autoPush": { "const": false },
+    "capabilities_evaluated": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "evidence_tier", "decision", "verdict", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "evidence_tier": { "type": "string", "enum": ["E1", "E2", "E3"] },
+          "expected_return": { "type": "null" },
+          "downside": { "type": ["string", "null"] },
+          "probability_ruin": { "type": "null" },
+          "capital_required": { "type": "null" },
+          "decision": { "type": "string", "enum": ["accept", "reject", "defer"] },
+          "verdict": { "type": "string", "enum": ["allow", "hold", "deny"] },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "capabilities_rejected": { "type": "array", "items": { "type": "string" } },
+    "capabilities_selected": { "type": "array", "items": { "type": "string" } },
+    "capabilities_held": { "type": "array", "items": { "type": "string" } },
+    "writes_at_risk": { "type": "integer", "minimum": 0 },
+    "evidence_tiers": {
+      "type": "object",
+      "required": ["E1", "E2", "E3"],
+      "additionalProperties": false,
+      "properties": {
+        "E1": { "type": "array", "items": { "type": "string" } },
+        "E2": { "type": "array", "items": { "type": "string" } },
+        "E3": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "topology_claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["claim", "evidence_tier", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "claim": { "type": "string" },
+          "evidence_tier": { "type": "string", "enum": ["E1", "E2", "E3"] },
+          "status": { "type": "string", "enum": ["active", "quarantined", "rejected"] }
+        }
+      }
+    },
+    "causal_claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["claim", "evidence_tier", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "claim": { "type": "string" },
+          "evidence_tier": { "type": "string", "enum": ["E1", "E2", "E3"] },
+          "status": { "type": "string", "enum": ["active", "quarantined", "rejected"] }
+        }
+      }
+    },
+    "audit_events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["timestamp", "event_type", "details"],
+        "additionalProperties": false,
+        "properties": {
+          "timestamp": { "type": "string", "format": "date-time" },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "cycle_start",
+              "capability_listed",
+              "capability_evaluated",
+              "capability_selected",
+              "capability_held",
+              "capability_denied",
+              "execution_started",
+              "execution_completed",
+              "balance_reconciled",
+              "kill_switch",
+              "post_exhaustion_mode",
+              "data_retention_action",
+              "evidence_sealed",
+              "error"
+            ]
+          },
+          "details": { "type": "object" }
+        }
+      }
+    },
+    "data_retention_actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["action", "artifact_type", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "action": { "type": "string", "enum": ["retain", "compress", "hash_only", "delete"] },
+          "artifact_type": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "next_action": { "type": ["string", "null"] },
+    "integrity": { "type": ["string", "null"] }
+  }
+}

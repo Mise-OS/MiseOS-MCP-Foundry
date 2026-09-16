@@ -33,12 +33,13 @@ Open **Registry**. A 3D hall of Season 1 plates with Ultra Mythic pedestals — 
 
 ## Capability gateway
 
-Repo-management tools go through **Capability Gateway**. Agents list, then invoke. Writes `hold` until a human approves. `push` is denied in v1.
+Repo-management tools go through **Capability Gateway**. Agents list, then invoke. Writes `hold` until a human approves. `push` is denied in v1. Each cycle emits `miseos.capability-gateway.cycle.v1` — unknown quantities stay null.
 
 Install the plugin from `plugin/` (Claude Code plugin layout):
 
 - `plugin/skills/capability-gateway/SKILL.md`
 - `plugin/skills/repo-steward/SKILL.md`
+- `plugin/schemas/gateway-cycle.schema.json`
 - `plugin/.mcp.json` + `plugin/mcp/gateway.mjs`
 
 ## Architecture
@@ -54,6 +55,7 @@ src/lib/agent/
 src/lib/steward.ts      client orchestrator
 src/data/exhibits.ts    atrium + hall catalog
 src/components/foundry/
+  Gateway.tsx           capability pass — list, invoke, cycle
   Steward.tsx           insights + Shield Pup perimeter
   TaskCenter.tsx        plan + approval
   PrDrafts.tsx          PR viewer
@@ -75,6 +77,9 @@ GitHub writes use the Contents + Pulls API. Without `GITHUB_TOKEN` the draft sta
 | `github_create_pr` | Open PR from an approved draft |
 | `guard_repo` | Shield Pup perimeter scan |
 | `kill_switch` | Freeze the line |
+| `capability_list` | Enumerate gated repo-management capabilities |
+| `capability_invoke` | Allow, hold, or deny a capability |
+| `capability_cycle` | Seal a `miseos.capability-gateway.cycle.v1` audit record |
 
 ## Safety
 
