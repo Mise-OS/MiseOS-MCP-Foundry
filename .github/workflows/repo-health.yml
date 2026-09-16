@@ -25,3 +25,7 @@ jobs:
           test -f .github/workflows/mise-repo-steward.yml
           test -d src
           test -d plugin
+      - name: Validate MCP JavaScript syntax
+        run: npm run typecheck
+      - name: Test OpenRouter free developer bot and card teams
+        run: npm test
