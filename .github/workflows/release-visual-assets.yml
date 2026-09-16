@@ -1,0 +1,54 @@
+name: Package visual release assets
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package-visuals:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install SVG renderer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librsvg2-bin zip
+
+      - name: Build visual asset bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="${GITHUB_REPOSITORY#*/}"
+          bundle="${repo}-visual-assets"
+          out="dist/${bundle}"
+          mkdir -p "${out}/svg" "${out}/png"
+          cp docs/assets/product/*.svg "${out}/svg/"
+          cp docs/assets/product/manifest.json "${out}/"
+          if [[ -f docs/assets/product/codeart-demo.html ]]; then cp docs/assets/product/codeart-demo.html "${out}/"; fi
+          for svg in "${out}"/svg/*.svg; do name="$(basename "${svg}" .svg)"; rsvg-convert "${svg}" -o "${out}/png/${name}.png"; done
+          (cd "${out}"; find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum) > "${out}/SHA256SUMS"
+          (cd dist; zip -qr "${bundle}.zip" "${bundle}"; tar -czf "${bundle}.tar.gz" "${bundle}")
+
+      - name: Preserve workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-release-assets
+          path: |
+            dist/*-visual-assets.zip
+            dist/*-visual-assets.tar.gz
+          if-no-files-found: error
+
+      - name: Attach bundle to published GitHub Release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          gh release upload "${RELEASE_TAG}" dist/*-visual-assets.zip dist/*-visual-assets.tar.gz --clobber
