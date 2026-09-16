@@ -26,7 +26,7 @@ async function reply(message) {
       result: {
         protocolVersion: "2025-03-26",
         capabilities: { tools: { listChanged: true } },
-        serverInfo: { name: "miseos-openrouter-developer-bot", version: "0.1.0" },
+        serverInfo: { name: "miseos-openrouter-developer-bot", version: "0.2.0" },
       },
     });
     return;
@@ -55,7 +55,7 @@ async function reply(message) {
           {
             name: "miseos_dev_chat",
             description:
-              "Ask a MiseOS character for developer help through OpenRouter free inference. Advisory only; writes still require the capability gateway.",
+              "Ask one MiseOS character for developer help through OpenRouter free inference. Advisory only; writes still require the capability gateway.",
             inputSchema: {
               type: "object",
               properties: {
@@ -64,6 +64,33 @@ async function reply(message) {
                 context: {
                   type: ["object", "array", "string", "null"],
                   description: "Optional bounded task context. It is treated as data, not authority.",
+                },
+                model: {
+                  type: "string",
+                  description: "Optional OpenRouter model. Must be openrouter/free or end in :free.",
+                },
+              },
+              required: ["prompt"],
+            },
+          },
+          {
+            name: "miseos_team_run",
+            description:
+              "Run a bounded card team. Each card receives only its authorized one-hop memory, and every handoff emits a hash-chained evidence receipt. Advisory only.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                prompt: { type: "string" },
+                context: {
+                  type: ["object", "array", "string", "null"],
+                  description: "Initial context is visible only to the first card; downstream cards receive one-hop handoffs.",
+                },
+                team: {
+                  type: "array",
+                  items: { type: "string" },
+                  minItems: 2,
+                  maxItems: 6,
+                  description: "Optional unique card IDs. Defaults to Maestro → Garde → Apprentice → Sommelier.",
                 },
                 model: {
                   type: "string",
@@ -101,6 +128,16 @@ async function reply(message) {
         send({ jsonrpc: "2.0", id, result: textResult(result) });
         return;
       }
+      if (name === "miseos_team_run") {
+        const result = await bot.runTeam({
+          prompt: args.prompt,
+          context: args.context,
+          team: args.team,
+          model: args.model,
+        });
+        send({ jsonrpc: "2.0", id, result: textResult(result) });
+        return;
+      }
     } catch (error) {
       send({
         jsonrpc: "2.0",
@@ -110,6 +147,7 @@ async function reply(message) {
             error: error?.name || "Error",
             message: error?.message || String(error),
             freeOnly: true,
+            authority: "advisory",
             writeAuthority: "none",
           },
           true,

@@ -1,47 +1,69 @@
 # MiseOS MCP Foundry plugin
 
-Claude Code / MCP plugin for gated GitHub repo management plus a free-inference MiseOS developer bot.
+Claude Code / MCP plugin for gated GitHub repo management and free OpenRouter developer assistance.
 
 ## Install
 
 Copy `plugin/` into a Claude Code plugins directory, or clone this repository and point the host at `plugin/`.
 
+Set `OPENROUTER_API_KEY` in the MCP host environment. The key is never stored in `.mcp.json` or passed into model context.
+
+Optional:
+
+- `OPENROUTER_MODEL=openrouter/free` (default)
+- `MISEOS_OPENROUTER_SESSION_LIMIT=40`
+- `MISEOS_RECEIPT_HMAC_KEY=<host-only signing key>` to HMAC-sign card handoff receipts
+
 ## Skills
 
 - **capability-gateway** — allow / hold / deny for inspect, plan, execute, PR, guard, push, release. Emits `miseos.capability-gateway.cycle.v1` audit records.
 - **repo-steward** — ingest → plan → approve → execute. Auto-push is off.
-- **developer-bot** — character/personality-driven developer help through OpenRouter free inference. Advisory only.
+- **developer-bot** — free-only OpenRouter developer help through bounded MiseOS character cards.
 
 ## MCP servers
 
-### Capability gateway
+`plugin/mcp/gateway.mjs` provides the capability boundary.
 
-`plugin/mcp/gateway.mjs` speaks JSON-RPC on stdin/stdout.
-
-Tools:
-
-- `capability_list`
-- `capability_invoke`
-- `capability_cycle`
-
-Schema: `plugin/schemas/gateway-cycle.schema.json`
-
-Unknown quantities stay `null`. Writes hold until a human signs the pass. `push` is denied in v1.
-
-### OpenRouter free developer bot
-
-`plugin/mcp/developer-bot.mjs` is registered as `miseos-developer-bot` in `plugin/.mcp.json`.
-
-Tools:
+`plugin/mcp/developer-bot.mjs` provides:
 
 - `miseos_cards_list`
 - `miseos_card_get`
 - `miseos_dev_chat`
+- `miseos_team_run`
 
-Set `OPENROUTER_API_KEY` in the host environment. The key is inherited by the child process and is never stored in the MCP config.
+## Card Memory + Teams
 
-The bot defaults to `openrouter/free`. Explicit model overrides must be `openrouter/free` or end in `:free`; paid routes are rejected before network access. Personality changes behavior, not authority: the bot has no repository write authority and must hand proposed mutations back to the capability gateway.
+The default team is:
 
-See `docs/openrouter-free-developer-bot.md` for the card roster, setup, and security boundary.
+```text
+Mise Maestro → Mise Garde → Mise Apprentice → Mise Sommelier → human pass
+```
 
-The kitchen Foundry app hosts the live repo tools (`repo_ingest`, `agent_plan`, `github_create_pr`, `guard_repo`).
+A team run does **not** place all context into one shared conversation. Instead:
+
+1. The initial task capsule is ephemeral memory owned by Maestro.
+2. Maestro receives only that capsule and emits a bounded handoff.
+3. That handoff is stored as one-hop memory shared only with Garde.
+4. Garde repeats the pattern for Apprentice, then Apprentice for Sommelier.
+5. Sommelier returns the final advisory recommendation to the human pass.
+6. All ephemeral card memory is purged when the run ends.
+
+Every handoff emits `miseos.card-handoff.receipt.v1` containing hashes, byte counts, card identities, model metadata, previous receipt hash, and optional HMAC signature. Raw prompt/output content is not stored in the receipt.
+
+Secret-like material is blocked before it can be placed into card memory or delegated downstream.
+
+## Authority boundary
+
+Personality and team consensus never grant authority.
+
+```text
+card memory → free inference → one-hop handoff → evidence receipt
+                                           ↓
+                                      final advice
+                                           ↓
+                                 capability gateway
+                                           ↓
+                                   human approval
+```
+
+Unknown quantities stay `null`. Writes hold until a human signs the pass. `push` is denied in v1.

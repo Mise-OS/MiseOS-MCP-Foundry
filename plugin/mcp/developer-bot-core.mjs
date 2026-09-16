@@ -7,18 +7,20 @@ import {
   OpenRouterFreeClient,
   buildDeveloperMessages,
 } from "./openrouter-client.mjs";
+import { CardTeamOrchestrator, DEFAULT_CARD_TEAM } from "./card-teams.mjs";
 
 function publicCard(card) {
   const { systemPrompt, ...rest } = card;
   return rest;
 }
 
-export function createDeveloperBot({ client = new OpenRouterFreeClient() } = {}) {
-  return {
+export function createDeveloperBot({ client = new OpenRouterFreeClient(), teamOptions = {} } = {}) {
+  const bot = {
     listCards() {
       return {
         schema: "miseos.character-card.list.v1",
         cards: listCharacterCards(),
+        defaultTeam: [...DEFAULT_CARD_TEAM],
       };
     },
 
@@ -60,4 +62,8 @@ export function createDeveloperBot({ client = new OpenRouterFreeClient() } = {})
       };
     },
   };
+
+  const team = new CardTeamOrchestrator({ bot, ...teamOptions });
+  bot.runTeam = (args) => team.run(args);
+  return bot;
 }
