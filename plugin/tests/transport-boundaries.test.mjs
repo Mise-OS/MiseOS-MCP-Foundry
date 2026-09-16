@@ -42,11 +42,23 @@ test("MCP id-less notifications produce no JSON-RPC response", async (t) => {
     stdio: ["pipe", "pipe", "pipe"],
     env: { ...process.env, OPENROUTER_API_KEY: "" },
   });
-  t.after(() => child.kill());
+  t.after(() => {
+    child.kill("SIGTERM");
+  });
   let stdout = "";
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk) => { stdout += chunk; });
   child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
-  await new Promise((resolve) => setTimeout(resolve, 80));
+  
+  // Properly wait for child process to exit or timeout
+  await new Promise((resolve) => {
+    const exitHandler = () => resolve();
+    const timeoutHandler = setTimeout(resolve, 500);
+    child.on("exit", () => {
+      clearTimeout(timeoutHandler);
+      exitHandler();
+    });
+  });
+  
   assert.equal(stdout, "");
 });
