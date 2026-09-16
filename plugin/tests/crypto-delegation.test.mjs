@@ -60,7 +60,11 @@ test("delegation capability is exact-scope, one-use, controller signed, and dest
   assert.match(claims.jti, /^cap_/);
   assert.throws(() => authority.verifyAndConsume(token, expected), /already been consumed/);
   assert.throws(() => authority.verify(token, { ...expected, targetKeyId: subject.keyId }), /targetKeyId mismatch/);
-  const tampered = `${token.slice(0, -1)}${token.endsWith("A") ? "B" : "A"}`;
+
+  const parts = token.split(".");
+  const badSignature = Buffer.from(parts[2], "base64url");
+  badSignature[0] ^= 0x01;
+  const tampered = `${parts[0]}.${parts[1]}.${badSignature.toString("base64url")}`;
   assert.throws(() => authority.verify(tampered, expected), DelegationCapabilityError);
 });
 
