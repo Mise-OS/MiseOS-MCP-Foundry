@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/product/readme-hero.svg" alt="MiseOS MCP Foundry — human-gated agent control plane" width="100%" />
+</p>
+
 # MiseOS MCP Foundry
 
 A kitchen control plane for composing micro-agents, binding MCP tools, and running a **gated copilot** over GitHub repos.
@@ -88,6 +92,18 @@ GitHub writes use the Contents + Pulls API. Without `GITHUB_TOKEN` the draft sta
 - Default branch is never pushed to
 - Evidence seals after every run
 - Shield Pup bark is the first deny
+
+## Visual assets & releases
+
+The product graphics are versioned with the repository so README, launch, package, and release surfaces stay traceable to source.
+
+- [README hero](docs/assets/product/readme-hero.svg)
+- [16:9 launch graphic](docs/assets/product/launch-16x9.svg)
+- [Interactive CodeArt trace demo](docs/assets/product/codeart-demo.html)
+- [Visual asset manifest](docs/assets/product/manifest.json)
+- [Release graphics workflow](.github/workflows/release-visual-assets.yml)
+
+When a GitHub Release is published, the workflow renders PNG copies from the SVG masters, generates `SHA256SUMS`, builds ZIP and TAR archives, stores them as an Actions artifact, and attaches both archives to the same release. Manual runs package the assets without publishing a release.
 
 ## License
 

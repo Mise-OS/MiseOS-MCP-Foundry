@@ -1,0 +1,29 @@
+name: Easy Starter CI
+
+on:
+  pull_request:
+    paths:
+      - "examples/easy-starter/**"
+      - ".github/workflows/easy-starter-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "examples/easy-starter/**"
+      - ".github/workflows/easy-starter-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/easy-starter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Verify starter
+        run: npm run verify

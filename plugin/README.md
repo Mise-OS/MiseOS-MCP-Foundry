@@ -12,17 +12,17 @@ Optional:
 
 - `OPENROUTER_MODEL=openrouter/free` (default)
 - `MISEOS_OPENROUTER_SESSION_LIMIT=40`
-- `MISEOS_RECEIPT_HMAC_KEY=<host-only signing key>` to HMAC-sign card handoff receipts
+- `MISEOS_OPENROUTER_TIMEOUT_MS=20000`
 
 ## Skills
 
-- **capability-gateway** — allow / hold / deny for inspect, plan, execute, PR, guard, push, release. Emits `miseos.capability-gateway.cycle.v1` audit records.
+- **capability-gateway** — allow / hold / deny for inspect, plan, execute, PR, guard, push, release.
 - **repo-steward** — ingest → plan → approve → execute. Auto-push is off.
 - **developer-bot** — free-only OpenRouter developer help through bounded MiseOS character cards.
 
 ## MCP servers
 
-`plugin/mcp/gateway.mjs` provides the capability boundary.
+`plugin/mcp/gateway.mjs` provides the repository capability boundary.
 
 `plugin/mcp/developer-bot.mjs` provides:
 
@@ -31,7 +31,7 @@ Optional:
 - `miseos_dev_chat`
 - `miseos_team_run`
 
-## Card Memory + Teams
+## Card Memory + Cryptographic Card Teams
 
 The default team is:
 
@@ -39,31 +39,60 @@ The default team is:
 Mise Maestro → Mise Garde → Mise Apprentice → Mise Sommelier → human pass
 ```
 
-A team run does **not** place all context into one shared conversation. Instead:
+A team run does **not** place all context into one shared conversation. The initial task capsule belongs only to Maestro; downstream cards receive only one-hop handoffs. All card memory is ephemeral and purged after the run.
 
-1. The initial task capsule is ephemeral memory owned by Maestro.
-2. Maestro receives only that capsule and emits a bounded handoff.
-3. That handoff is stored as one-hop memory shared only with Garde.
-4. Garde repeats the pattern for Apprentice, then Apprentice for Sommelier.
-5. Sommelier returns the final advisory recommendation to the human pass.
-6. All ephemeral card memory is purged when the run ends.
+Each runtime card instance receives a separate Ed25519 workload identity. Private keys remain inside the trusted orchestration process and are never placed into model prompts, card memory, MCP responses, or OpenRouter payloads.
 
-Every handoff emits `miseos.card-handoff.receipt.v1` containing hashes, byte counts, card identities, model metadata, previous receipt hash, and optional HMAC signature. Raw prompt/output content is not stored in the receipt.
+Before each hop, a separate Ed25519 team-controller identity mints a short-lived, one-use `miseos.delegation-capability.v1` token. The token is bound to:
 
-Secret-like material is blocked before it can be placed into card memory or delegated downstream.
+- source workload ID and key ID
+- exact destination workload ID and key ID, or `human-pass`
+- team run ID
+- hop number
+- input memory ID and input hash
+- previous receipt hash
+- issue/expiry times and unique token ID
+- the single internal capability `card.process-and-handoff`
+
+The token is verified and consumed **before** model execution. Card consensus never grants repository mutation authority.
+
+Every handoff then emits `miseos.card-handoff.receipt.v2`. The receipt contains the consumed capability token, its hash, the card's public workload identity, source/destination metadata, input/output hashes, model metadata, previous receipt hash, and an Ed25519 signature produced by the source card workload key. Raw prompt/output content is not copied into the receipt.
+
+This creates two independent proofs:
+
+```text
+team-controller key → authorizes exact one-hop capability
+card workload key   → attests the resulting handoff receipt
+```
+
+A controller token cannot forge a card receipt, and a card key cannot mint a broader controller capability.
+
+Secret-like material is blocked before it can enter card memory, downstream handoffs, or OpenRouter request payloads.
 
 ## Authority boundary
 
-Personality and team consensus never grant authority.
-
 ```text
-card memory → free inference → one-hop handoff → evidence receipt
-                                           ↓
-                                      final advice
-                                           ↓
-                                 capability gateway
-                                           ↓
-                                   human approval
+bounded memory
+      ↓
+controller-signed one-hop capability
+      ↓
+card workload identity
+      ↓
+free model inference
+      ↓
+Ed25519-signed evidence receipt
+      ↓
+next bounded workload / human pass
+      ↓
+repository capability gateway
+      ↓
+human approval for writes
 ```
 
-Unknown quantities stay `null`. Writes hold until a human signs the pass. `push` is denied in v1.
+Personality, cryptographic team identity, and team consensus remain advisory. They do not grant `execute`, `push`, `release`, or repository-write authority.
+
+## Production key-management boundary
+
+The current reference implementation generates card and controller Ed25519 keys in-process for each runtime instance. Production deployments should inject equivalent workload signers backed by KMS/HSM/TEE or another protected workload-identity service, persist replay/JTI state outside one process when cross-process replay resistance is required, and anchor the controller public key in an independently trusted configuration.
+
+Unknown quantities stay `null`. Writes hold until a human signs the pass.

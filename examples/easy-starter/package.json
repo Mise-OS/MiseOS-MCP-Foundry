@@ -1,0 +1,17 @@
+{
+  "name": "miseos-easy-starter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MiseOS Card Teams starter with Ed25519 workload identities and one-hop delegation tokens.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/cli.mjs",
+    "demo": "node src/demo.mjs",
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check src/miseos.mjs && node --check src/cli.mjs && node --check src/demo.mjs",
+    "verify": "npm run check && npm test && npm run demo >/dev/null"
+  }
+}
