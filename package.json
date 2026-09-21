@@ -8,8 +8,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test plugin/tests/*.test.mjs",
-    "typecheck": "node --check plugin/mcp/gateway.mjs && node --check plugin/mcp/developer-bot.mjs && node --check plugin/mcp/developer-bot-core.mjs && node --check plugin/mcp/openrouter-client.mjs && node --check plugin/mcp/character-cards.mjs && node --check plugin/mcp/card-memory.mjs && node --check plugin/mcp/workload-identities.mjs && node --check plugin/mcp/delegation-capabilities.mjs && node --check plugin/mcp/evidence-receipts.mjs && node --check plugin/mcp/card-teams.mjs",
+    "test": "node --test plugin/tests/*.test.mjs examples/miseos-easy-starter/test/*.test.mjs",
+    "typecheck": "node --check plugin/mcp/gateway.mjs && node --check plugin/mcp/developer-bot.mjs && node --check plugin/mcp/developer-bot-core.mjs && node --check plugin/mcp/openrouter-client.mjs && node --check plugin/mcp/character-cards.mjs && node --check plugin/mcp/card-memory.mjs && node --check plugin/mcp/workload-identities.mjs && node --check plugin/mcp/delegation-capabilities.mjs && node --check plugin/mcp/evidence-receipts.mjs && node --check plugin/mcp/card-teams.mjs && node --check examples/miseos-easy-starter/src/env.mjs && node --check examples/miseos-easy-starter/src/cli.mjs && node --check examples/miseos-easy-starter/src/demo.mjs",
     "build": "npm run typecheck",
     "lint": "npm run typecheck"
   }

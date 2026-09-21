@@ -1,0 +1,14 @@
+{
+  "name": "miseos-easy-starter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Zero-dependency launcher for the production MiseOS Ed25519 Card Teams runtime.",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/cli.mjs",
+    "demo": "node src/demo.mjs",
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check src/env.mjs && node --check src/cli.mjs && node --check src/demo.mjs"
+  }
+}
