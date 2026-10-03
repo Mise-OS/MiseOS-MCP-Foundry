@@ -68,7 +68,11 @@ export class EvidenceReceiptChain {
 
       const identity = receipt.workloadIdentity;
       if (!identity || identity.cardId !== receipt.fromCardId || identity.algorithm !== "Ed25519") return false;
-      if (keyIdForPublicKey(identity.publicKey) !== identity.keyId) return false;
+      try {
+        if (keyIdForPublicKey(identity.publicKey) !== identity.keyId) return false;
+      } catch {
+        return false;
+      }
       if (!verifyEd25519({ publicKey: identity.publicKey, payload: receiptHash, signature })) return false;
       if (hashCapabilityToken(receipt.capabilityToken) !== receipt.capabilityTokenHash) return false;
 
