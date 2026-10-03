@@ -25,6 +25,10 @@ export function sha256(value) {
 }
 
 function asPublicKey(publicKey) {
+  const key = publicKey?.type === "public" ? publicKey : createPublicKey(publicKey);
+  if (key.asymmetricKeyType !== "ed25519") throw new TypeError("An Ed25519 public key is required.");
+  return key;
+}
   return publicKey?.type === "public" ? publicKey : createPublicKey(publicKey);
 }
 
