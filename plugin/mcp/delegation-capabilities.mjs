@@ -109,7 +109,15 @@ export class DelegationCapabilityAuthority {
   verify(token, expected = {}, { consume = false, now = Date.now() } = {}) {
     const { header, claims, signature, signingInput } = this.inspect(token);
     const authority = this.#controller.descriptor;
-    if (header.alg !== "EdDSA" || header.typ !== TOKEN_TYPE || header.kid !== authority.keyId) {
+    if (
+      !header ||
+      typeof header !== "object" ||
+      !claims ||
+      typeof claims !== "object" ||
+      header.alg !== "EdDSA" ||
+      header.typ !== TOKEN_TYPE ||
+      header.kid !== authority.keyId
+    ) {
       throw new DelegationCapabilityError("Delegation capability header is invalid.");
     }
     if (keyIdForPublicKey(authority.publicKey) !== authority.keyId) {
