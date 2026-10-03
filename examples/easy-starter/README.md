@@ -23,7 +23,7 @@ Requires Node.js 20+ and has no npm dependencies.
 
 ```bash
 cp .env.example .env
-# Add OPENROUTER_API_KEY to .env if you want live inference.
+# OPENROUTER_API_KEY is required for npm start; without a key the CLI exits with "OPENROUTER_API_KEY missing". Run the offline demo instead with: npm run demo
 npm start
 ```
 
