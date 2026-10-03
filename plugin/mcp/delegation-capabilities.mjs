@@ -159,7 +159,9 @@ export class DelegationCapabilityAuthority {
       if (!verifyEd25519({ publicKey: authorityDescriptor.publicKey, payload: signingInput, signature: parts[2] })) return false;
       if (claims.schema !== TOKEN_SCHEMA || claims.capability !== CAPABILITY) return false;
       if (claims.iss !== authorityDescriptor.workloadId || claims.issuerKeyId !== authorityDescriptor.keyId) return false;
-      if (Date.parse(claims.iat) > now || Date.parse(claims.exp) <= now) return false;
+      const issued = Date.parse(claims.iat);
+      const expires = Date.parse(claims.exp);
+      if (!Number.isFinite(issued) || !Number.isFinite(expires) || !Number.isFinite(now) || issued > now || expires <= now) return false;
       for (const [key, value] of Object.entries(expected)) {
         if (value !== undefined && claims[key] !== value) return false;
       }
