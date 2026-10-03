@@ -29,8 +29,6 @@ function asPublicKey(publicKey) {
   if (key.asymmetricKeyType !== "ed25519") throw new TypeError("An Ed25519 public key is required.");
   return key;
 }
-  return publicKey?.type === "public" ? publicKey : createPublicKey(publicKey);
-}
 
 function publicKeyPem(publicKey) {
   return asPublicKey(publicKey).export({ type: "spki", format: "pem" }).toString();

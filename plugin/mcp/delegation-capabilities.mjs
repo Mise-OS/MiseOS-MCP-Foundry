@@ -30,14 +30,46 @@ export class DelegationCapabilityError extends Error {
   }
 }
 
+function assertScope({ targetCardId, runId, hop, memoryId, inputHash, previousReceiptHash }) {
+  for (const [name, value] of Object.entries({ targetCardId, runId, memoryId })) {
+    if (typeof value !== "string" || !value.trim()) throw new DelegationCapabilityError(`Invalid delegation scope: ${name}.`);
+  }
+  if (!Number.isSafeInteger(hop) || hop < 1) throw new DelegationCapabilityError("Invalid delegation scope: hop.");
+  for (const [name, value] of Object.entries({ inputHash, previousReceiptHash })) {
+    if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value)) {
+      throw new DelegationCapabilityError(`Invalid delegation scope: ${name}.`);
+    }
+  }
+}
+
 export class DelegationCapabilityAuthority {
   #controller;
-  #consumed = new Set();
+  #consumed = new Map();
+  // Receipt emission can outlive the token TTL. Keep consumption proof tied to
+  // the returned claims object without retaining completed runs indefinitely.
+  #authorizations = new WeakMap();
   #defaultTtlMs;
 
   constructor({ controller = new Ed25519ControllerIdentity(), defaultTtlMs = 60_000 } = {}) {
     this.#controller = controller;
     this.#defaultTtlMs = Math.max(1_000, Math.min(10 * 60_000, Number(defaultTtlMs) || 60_000));
+  }
+
+  #pruneConsumed(now = Date.now()) {
+    for (const [jti, expires] of this.#consumed) {
+      if (expires <= now) this.#consumed.delete(jti);
+    }
+  }
+
+  get consumedCount() {
+    this.#pruneConsumed();
+    return this.#consumed.size;
+  }
+
+  authorizationTime(token, claims) {
+    const proof = this.#authorizations.get(claims);
+    if (!proof || proof.token !== token) throw new Error("A consumed delegation capability is required.");
+    return proof.now;
   }
 
   get descriptor() {
@@ -63,6 +95,10 @@ export class DelegationCapabilityAuthority {
     }
     if (targetIdentity && targetCardId !== targetIdentity.cardId) {
       throw new DelegationCapabilityError("Target card does not match target workload identity.");
+    }
+    assertScope({ targetCardId, runId, hop, memoryId, inputHash, previousReceiptHash });
+    if (!targetIdentity && targetCardId !== "human-pass") {
+      throw new DelegationCapabilityError("A destination workload identity is required.");
     }
     const now = Date.now();
     const lifetime = Math.max(1_000, Math.min(this.#defaultTtlMs, Number(ttlMs) || this.#defaultTtlMs));
@@ -107,6 +143,8 @@ export class DelegationCapabilityAuthority {
   }
 
   verify(token, expected = {}, { consume = false, now = Date.now() } = {}) {
+    this.#pruneConsumed();
+    if (!Number.isFinite(now)) throw new DelegationCapabilityError("Invalid verification time.");
     const { header, claims, signature, signingInput } = this.inspect(token);
     const authority = this.#controller.descriptor;
     if (
@@ -132,6 +170,7 @@ export class DelegationCapabilityAuthority {
     if (claims.iss !== authority.workloadId || claims.issuerKeyId !== authority.keyId) {
       throw new DelegationCapabilityError("Delegation capability issuer does not match the trusted controller.");
     }
+    assertScope(claims);
     const expires = Date.parse(claims.exp);
     const issued = Date.parse(claims.iat);
     if (!Number.isFinite(expires) || !Number.isFinite(issued) || issued > now || expires <= now) {
@@ -143,12 +182,15 @@ export class DelegationCapabilityAuthority {
       }
     }
     if (consume) {
+      if (expires <= Date.now()) throw new DelegationCapabilityError("Delegation capability has expired.");
       if (this.#consumed.has(claims.jti)) {
         throw new DelegationCapabilityError("Delegation capability has already been consumed.");
       }
-      this.#consumed.add(claims.jti);
+      this.#consumed.set(claims.jti, expires);
     }
-    return { ...claims };
+    const verified = Object.freeze({ ...claims });
+    if (consume) this.#authorizations.set(verified, { token, now });
+    return verified;
   }
 
   verifyAndConsume(token, expected = {}, options = {}) {
@@ -167,6 +209,7 @@ export class DelegationCapabilityAuthority {
       if (!verifyEd25519({ publicKey: authorityDescriptor.publicKey, payload: signingInput, signature: parts[2] })) return false;
       if (claims.schema !== TOKEN_SCHEMA || claims.capability !== CAPABILITY) return false;
       if (claims.iss !== authorityDescriptor.workloadId || claims.issuerKeyId !== authorityDescriptor.keyId) return false;
+      assertScope(claims);
       const issued = Date.parse(claims.iat);
       const expires = Date.parse(claims.exp);
       if (!Number.isFinite(issued) || !Number.isFinite(expires) || !Number.isFinite(now) || issued > now || expires <= now) return false;

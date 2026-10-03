@@ -209,3 +209,58 @@ test("empty teams and secret-like task material are rejected", async () => {
     /secret-like material/,
   );
 });
+
+test("missing run scopes are rejected before memory storage or reads", () => {
+  const memory = new MemoryStore();
+  for (const runId of [undefined, null, "", " ", 0, {}]) {
+    assert.throws(() => memory.put({ runId, ownerCardId: "mise-maestro", content: "safe" }), /runId/);
+  }
+  assert.equal(memory.size(), 0);
+  const ref = memory.put({ runId: "run_valid", ownerCardId: "mise-maestro", content: "safe" });
+  assert.throws(() => memory.read({ requesterCardId: "mise-maestro", memoryId: ref.id }), /runId/);
+});
+
+test("inherited property names cannot enter card identity or team pipelines", async () => {
+  const identities = new WorkloadRegistry();
+  const team = new CardTeam({ client: new OfflineClient(), identities });
+  for (const id of ["constructor", "__proto__", "toString", "valueOf"]) {
+    assert.throws(() => identities.ensureCard(id), /Unknown card/);
+    await assert.rejects(team.run({ prompt: "safe", team: [id] }), /Unknown card/);
+  }
+});
+
+test("Bearer prose is accepted and credential-shaped values remain blocked", async () => {
+  const { assertNoSecrets } = await import("../src/miseos.mjs");
+  for (const text of [
+    "Explain how to implement Bearer authentication in a REST API",
+    "Bearer authenticationauthorization is a concept",
+  ]) {
+    assert.equal(assertNoSecrets(text), text);
+  }
+  for (const text of [
+    "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature",
+    "Bearer abcdefghijklmnopqrstuv0123456789",
+    "Authorization: Bearer abcdefghijklmnopqrstuv",
+  ]) assert.throws(() => assertNoSecrets(text), /secret-like/);
+});
+
+test("timeout configuration falls back to 20 seconds for invalid values", async (t) => {
+  const { OpenRouterFreeClient, CARDS } = await import("../src/miseos.mjs");
+  const previous = process.env.MISEOS_OPENROUTER_TIMEOUT_MS;
+  t.after(() => {
+    if (previous === undefined) delete process.env.MISEOS_OPENROUTER_TIMEOUT_MS;
+    else process.env.MISEOS_OPENROUTER_TIMEOUT_MS = previous;
+  });
+  const delays = [];
+  t.mock.method(globalThis, "setTimeout", (_fn, delay) => { delays.push(delay); return {}; });
+  t.mock.method(globalThis, "clearTimeout", () => {});
+  t.mock.method(globalThis, "fetch", async () => ({
+    ok: true, json: async () => ({ choices: [{ message: { content: "safe" } }] }),
+  }));
+  const client = new OpenRouterFreeClient({ apiKey: "test-only" });
+  for (const raw of ["invalid", "", " ", "NaN", "Infinity", "-1", "0", "1.5", "2147483648", "2500"]) {
+    process.env.MISEOS_OPENROUTER_TIMEOUT_MS = raw;
+    await client.chat({ card: CARDS["mise-maestro"], prompt: "safe", context: "safe" });
+    assert.equal(delays.at(-1), raw === "2500" ? 2500 : 20000);
+  }
+});

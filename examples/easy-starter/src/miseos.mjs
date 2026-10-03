@@ -86,7 +86,8 @@ const SECRET_PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/i,
   /\b(?:sk|ghp|gho|ghu|ghs|github_pat)[-_A-Za-z0-9]{12,}\b/,
   /\bAKIA[A-Z0-9]{12,}\b/,
-  /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b/i,
+  /\bAuthorization\s*:\s*Bearer\s+\S+/i,
+  /\bBearer\s+(?=[A-Za-z0-9._~+/=-]{20,}(?![A-Za-z0-9._~+/=-]))(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]+/i,
   /OPENROUTER_API_KEY\s*=/i,
 ];
 
@@ -157,7 +158,7 @@ export class WorkloadRegistry {
 
   ensureCard(cardId) {
     const id = String(cardId).trim().toLowerCase();
-    if (!CARDS[id]) throw new Error(`Unknown card: ${cardId}`);
+    if (!Object.hasOwn(CARDS, id)) throw new Error(`Unknown card: ${cardId}`);
     if (!this.#cards.has(id)) {
       const identity = newIdentity({ cardId: id, role: "card", instanceId: this.#instanceId });
       this.#cards.set(id, identity.descriptor);
@@ -203,14 +204,46 @@ function parseB64json(value) {
   return JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
 }
 
+function assertScope({ targetCardId, runId, hop, memoryId, inputHash, previousReceiptHash }) {
+  for (const [name, value] of Object.entries({ targetCardId, runId, memoryId })) {
+    if (typeof value !== "string" || !value.trim()) throw new Error(`Invalid delegation scope: ${name}.`);
+  }
+  if (!Number.isSafeInteger(hop) || hop < 1) throw new Error("Invalid delegation scope: hop.");
+  for (const [name, value] of Object.entries({ inputHash, previousReceiptHash })) {
+    if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value)) {
+      throw new Error(`Invalid delegation scope: ${name}.`);
+    }
+  }
+}
+
 export class DelegationAuthority {
   #controller;
-  #consumed = new Set();
+  #consumed = new Map();
+  // Receipt emission can outlive the token TTL. Keep consumption proof tied to
+  // the returned claims object without retaining completed runs indefinitely.
+  #authorizations = new WeakMap();
   #ttlMs;
 
   constructor({ controller = new ControllerIdentity(), ttlMs = 60_000 } = {}) {
     this.#controller = controller;
     this.#ttlMs = Math.max(1_000, Math.min(600_000, ttlMs));
+  }
+
+  #pruneConsumed(now = Date.now()) {
+    for (const [jti, expires] of this.#consumed) {
+      if (expires <= now) this.#consumed.delete(jti);
+    }
+  }
+
+  get consumedCount() {
+    this.#pruneConsumed();
+    return this.#consumed.size;
+  }
+
+  authorizationTime(token, claims) {
+    const proof = this.#authorizations.get(claims);
+    if (!proof || proof.token !== token) throw new Error("A consumed delegation capability is required.");
+    return proof.now;
   }
 
   get descriptor() {
@@ -227,6 +260,13 @@ export class DelegationAuthority {
     inputHash,
     previousReceiptHash,
   }) {
+    if (!subject?.workloadId || !subject?.keyId || !subject?.cardId) {
+      throw new Error("A card workload identity is required.");
+    }
+    if (target ? (!target.workloadId || !target.keyId || target.cardId !== targetCardId) : targetCardId !== "human-pass") {
+      throw new Error("Invalid destination workload identity.");
+    }
+    assertScope({ targetCardId, runId, hop, memoryId, inputHash, previousReceiptHash });
     const now = Date.now();
     const header = {
       alg: "EdDSA",
@@ -258,6 +298,8 @@ export class DelegationAuthority {
   }
 
   verify(token, expected = {}, { consume = false, now = Date.now() } = {}) {
+    this.#pruneConsumed();
+    if (!Number.isFinite(now)) throw new Error("Invalid verification time.");
     const parts = String(token).split(".");
     if (parts.length !== 3) throw new Error("Malformed delegation token.");
     const header = parseB64json(parts[0]);
@@ -289,6 +331,7 @@ export class DelegationAuthority {
       throw new Error("Delegation capability invalid.");
     }
 
+    assertScope(claims);
     const issuedAt = Date.parse(claims.iat);
     const expiresAt = Date.parse(claims.exp);
     if (
@@ -308,11 +351,14 @@ export class DelegationAuthority {
     }
 
     if (consume) {
+      if (expiresAt <= Date.now()) throw new Error("Delegation token expired.");
       if (this.#consumed.has(claims.jti)) throw new Error("Delegation token already consumed.");
-      this.#consumed.add(claims.jti);
+      this.#consumed.set(claims.jti, expiresAt);
     }
 
-    return { ...claims };
+    const verified = Object.freeze({ ...claims });
+    if (consume) this.#authorizations.set(verified, { token, now });
+    return verified;
   }
 
   verifyAndConsume(token, expected) {
@@ -321,6 +367,7 @@ export class DelegationAuthority {
 
   static verifyExternal(token, authority, expected = {}, now = Date.now()) {
     try {
+      if (!Number.isFinite(now)) return false;
       const parts = String(token).split(".");
       if (parts.length !== 3) return false;
       const header = parseB64json(parts[0]);
@@ -348,6 +395,7 @@ export class DelegationAuthority {
         claims.issuerKeyId !== authority.keyId
       ) return false;
 
+      assertScope(claims);
       const issuedAt = Date.parse(claims.iat);
       const expiresAt = Date.parse(claims.exp);
       if (
@@ -373,6 +421,7 @@ export class MemoryStore {
   #items = new Map();
 
   put({ runId, ownerCardId, content, shareWith = [] }) {
+    if (typeof runId !== "string" || !runId.trim()) throw new Error("Memory runId is required.");
     const text = assertNoSecrets(content, "card memory");
     if (Buffer.byteLength(text, "utf8") > 12_000) throw new Error("Card memory exceeds 12KB.");
 
@@ -390,6 +439,7 @@ export class MemoryStore {
   }
 
   read({ runId, requesterCardId, memoryId }) {
+    if (typeof runId !== "string" || !runId.trim()) throw new Error("Memory runId is required.");
     const item = this.#items.get(memoryId);
     if (!item || item.runId !== runId) throw new Error("Memory missing or wrong run.");
     if (Date.parse(item.expiresAt) <= Date.now()) throw new Error("Memory expired.");
@@ -419,6 +469,21 @@ export class ReceiptChain {
   append(receipts, event) {
     const previousReceiptHash = receipts.at(-1)?.receiptHash ?? ZERO_HASH;
     const identity = this.identities.ensureCard(event.fromCardId);
+    const authorizedAt = this.authority.authorizationTime(event.token, event.claims);
+    const claims = DelegationAuthority.verifyExternal(event.token, this.authority.descriptor, {
+      sub: identity.workloadId,
+      subjectKeyId: identity.keyId,
+      subjectCardId: event.fromCardId,
+      aud: event.toWorkloadId ?? "human-pass",
+      targetCardId: event.toCardId,
+      targetKeyId: event.toWorkloadKeyId ?? null,
+      runId: event.runId,
+      hop: receipts.length + 1,
+      memoryId: event.inputMemoryId,
+      inputHash: sha256(event.input),
+      previousReceiptHash,
+    }, authorizedAt);
+    if (!claims) throw new Error("Delegation capability does not authorize this receipt event.");
 
     const body = {
       schema: "miseos.card-handoff.receipt.v2",
@@ -436,10 +501,11 @@ export class ReceiptChain {
       workloadIdentity: { ...identity },
       capabilityToken: event.token,
       capabilityTokenHash: sha256(event.token),
-      capabilityJti: event.claims.jti,
+      capabilityJti: claims.jti,
       authority: "advisory",
       writeAuthority: "none",
-      createdAt: new Date().toISOString(),
+      authorizedAt: new Date(authorizedAt).toISOString(),
+      createdAt: new Date(Date.now()).toISOString(),
     };
 
     const receiptHash = sha256(body);
@@ -464,6 +530,9 @@ export class ReceiptChain {
     for (const receipt of receipts) {
       if (receipt.previousReceiptHash !== previous) return false;
 
+      const authorizedAt = Date.parse(receipt.authorizedAt ?? receipt.createdAt);
+      const createdAt = Date.parse(receipt.createdAt);
+      if (!Number.isFinite(authorizedAt) || !Number.isFinite(createdAt) || authorizedAt > createdAt) return false;
       const { receiptHash, signature, signatureAlgorithm, ...body } = receipt;
       if (sha256(body) !== receiptHash) return false;
       if (signatureAlgorithm !== "Ed25519") return false;
@@ -498,7 +567,7 @@ export class ReceiptChain {
           inputHash: receipt.inputHash,
           previousReceiptHash: receipt.previousReceiptHash,
         },
-        Date.parse(receipt.createdAt),
+        Date.parse(receipt.authorizedAt ?? receipt.createdAt),
       );
 
       if (!claims || claims.jti !== receipt.capabilityJti) return false;
@@ -550,7 +619,10 @@ export class OpenRouterFreeClient {
     const safePrompt = assertNoSecrets(prompt, "prompt");
     const safeContext = assertNoSecrets(context, "context").slice(0, 16_000);
     const controller = new AbortController();
-    const timeout = Number(process.env.MISEOS_OPENROUTER_TIMEOUT_MS || 20_000);
+    const configuredTimeout = Number(process.env.MISEOS_OPENROUTER_TIMEOUT_MS);
+    const timeout = Number.isSafeInteger(configuredTimeout) && configuredTimeout > 0 && configuredTimeout <= 2_147_483_647
+      ? configuredTimeout
+      : 20_000;
     const timer = setTimeout(() => controller.abort(), timeout);
 
     try {
@@ -628,7 +700,7 @@ export class CardTeam {
     if (!Array.isArray(team) || team.length === 0) throw new Error("At least one card is required.");
     if (new Set(team).size !== team.length) throw new Error("Duplicate/cyclic cards denied.");
     for (const id of team) {
-      if (!CARDS[id]) throw new Error(`Unknown card: ${id}`);
+      if (!Object.hasOwn(CARDS, id)) throw new Error(`Unknown card: ${id}`);
       this.identities.ensureCard(id);
     }
 

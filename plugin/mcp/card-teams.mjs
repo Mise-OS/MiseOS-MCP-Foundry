@@ -53,6 +53,9 @@ export class CardTeamOrchestrator {
     maxHops = 6,
   } = {}) {
     if (!bot?.chat) throw new Error("CardTeamOrchestrator requires a developer bot with chat().");
+    if (receipts.identities !== identities || receipts.delegationAuthority !== delegationAuthority) {
+      throw new Error("Receipt chain must share the orchestrator identity registry and delegation authority.");
+    }
     this.bot = bot;
     this.memory = memory;
     this.identities = identities;

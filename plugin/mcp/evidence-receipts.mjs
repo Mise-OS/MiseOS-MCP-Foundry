@@ -23,7 +23,22 @@ export class EvidenceReceiptChain {
     }
     const previousReceiptHash = receipts.at(-1)?.receiptHash ?? "0".repeat(64);
     const workloadIdentity = this.identities.ensureCard(event.fromCardId);
-    const claims = event.authorization.claims;
+    const authorizedAt = this.delegationAuthority.authorizationTime(event.authorization.token, event.authorization.claims);
+    const claims = DelegationCapabilityAuthority.verifyWithAuthority(event.authorization.token, this.delegationAuthority.descriptor, {
+      sub: workloadIdentity.workloadId,
+      subjectKeyId: workloadIdentity.keyId,
+      subjectCardId: event.fromCardId,
+      aud: event.toWorkloadId ?? "human-pass",
+      targetCardId: event.toCardId,
+      targetKeyId: event.toWorkloadKeyId ?? null,
+      runId: event.runId,
+      hop: receipts.length + 1,
+      memoryId: event.inputMemoryId,
+      inputHash: sha256(event.input),
+      previousReceiptHash,
+    }, { now: authorizedAt });
+    if (!claims) throw new Error("Delegation capability does not authorize this receipt event.");
+
     const body = {
       schema: "miseos.card-handoff.receipt.v2",
       sequence: receipts.length + 1,
@@ -48,7 +63,8 @@ export class EvidenceReceiptChain {
       capabilityIssuerKeyId: claims.issuerKeyId,
       authority: "advisory",
       writeAuthority: "none",
-      createdAt: new Date().toISOString(),
+      authorizedAt: new Date(authorizedAt).toISOString(),
+      createdAt: new Date(Date.now()).toISOString(),
     };
     const receiptHash = sha256(body);
     const signature = this.identities.sign({ workloadId: workloadIdentity.workloadId, payload: receiptHash });
@@ -63,6 +79,9 @@ export class EvidenceReceiptChain {
       const receipt = receipts[index];
       if (receipt.sequence !== index + 1 || receipt.previousReceiptHash !== previousReceiptHash) return false;
       if (receipt.schema !== "miseos.card-handoff.receipt.v2") return false;
+      const authorizedAt = Date.parse(receipt.authorizedAt ?? receipt.createdAt);
+      const createdAt = Date.parse(receipt.createdAt);
+      if (!Number.isFinite(authorizedAt) || !Number.isFinite(createdAt) || authorizedAt > createdAt) return false;
       const { receiptHash, signature, signatureAlgorithm, ...body } = receipt;
       if (sha256(body) !== receiptHash || signatureAlgorithm !== "Ed25519" || !signature) return false;
 
@@ -92,7 +111,7 @@ export class EvidenceReceiptChain {
           inputHash: receipt.inputHash,
           previousReceiptHash: receipt.previousReceiptHash,
         },
-        { now: Date.parse(receipt.createdAt) },
+        { now: Date.parse(receipt.authorizedAt ?? receipt.createdAt) },
       );
       if (!claims) return false;
       if (claims.jti !== receipt.capabilityJti || claims.issuerKeyId !== receipt.capabilityIssuerKeyId) return false;

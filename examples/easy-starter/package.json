@@ -10,8 +10,8 @@
   "scripts": {
     "start": "node src/cli.mjs",
     "demo": "node src/demo.mjs",
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test",
     "check": "node --check src/miseos.mjs && node --check src/cli.mjs && node --check src/demo.mjs",
-    "verify": "npm run check && npm test && npm run demo >/dev/null"
+    "verify": "npm run check && npm test && npm run demo"
   }
 }
