@@ -540,7 +540,9 @@ export class OpenRouterFreeClient {
   async chat({ card, prompt, context, model = this.model }) {
     this.#assertFree(model);
     if (!this.apiKey) throw new Error("OPENROUTER_API_KEY missing. Add it to .env or run npm run demo.");
-    if (++this.requests > Number(process.env.MISEOS_OPENROUTER_SESSION_LIMIT || 40)) {
+    const configuredLimit = Number(process.env.MISEOS_OPENROUTER_SESSION_LIMIT || 40);
+    const sessionLimit = Number.isSafeInteger(configuredLimit) ? Math.max(1, configuredLimit) : 40;
+    if (++this.requests > sessionLimit) {
       throw new Error("OpenRouter session limit reached.");
     }
 
