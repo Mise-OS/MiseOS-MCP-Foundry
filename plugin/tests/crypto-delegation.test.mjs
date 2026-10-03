@@ -117,5 +117,13 @@ test("Ed25519 receipt binds signer identity, destination identity, and delegatio
   assert.equal(receipts[0].signatureAlgorithm, "Ed25519");
   assert.equal(receipts[0].workloadIdentity.keyId, subject.keyId);
   assert.equal(receipts[0].capabilityTokenHash, hashCapabilityToken(token));
-  assert.equal(chain.verify([{ ...receipts[0], toCardId: "mise-apprentice" }]), false);
+  const { receiptHash: _receiptHash, signature: _signature, signatureAlgorithm: _signatureAlgorithm, ...unsignedBody } = receipts[0];
+  const modifiedBody = { ...unsignedBody, toCardId: "mise-apprentice" };
+  const reSigned = {
+    ...modifiedBody,
+    receiptHash: sha256(modifiedBody),
+    signature: identities.sign({ workloadId: subject.workloadId, payload: sha256(modifiedBody) }),
+    signatureAlgorithm: "Ed25519",
+  };
+  assert.equal(chain.verify([reSigned]), false);
 });
