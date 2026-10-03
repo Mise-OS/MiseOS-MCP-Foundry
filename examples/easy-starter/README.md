@@ -12,7 +12,7 @@ The starter is deliberately not a repository-writing agent. Its governing bounda
 - Controller-signed, destination-bound, one-use delegation capabilities
 - Run-scoped, card-scoped ephemeral memory
 - Hash-linked, card-signed handoff receipts
-- Offline deterministic demo mode
+- Offline demo mode (no live model; run identifiers and receipt hashes are randomly generated per run)
 - Optional OpenRouter free-model inference
 - Secret-like material rejected before model context
 - Explicit `authority: advisory` and `writeAuthority: none`
