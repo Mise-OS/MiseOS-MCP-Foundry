@@ -298,6 +298,8 @@ export class DelegationAuthority {
   }
 
   verify(token, expected = {}, { consume = false, now = Date.now() } = {}) {
+    const consumedAt = consume ? Date.now() : null;
+    if (consume) now = consumedAt;
     this.#pruneConsumed();
     if (!Number.isFinite(now)) throw new Error("Invalid verification time.");
     const parts = String(token).split(".");
@@ -357,7 +359,7 @@ export class DelegationAuthority {
     }
 
     const verified = Object.freeze({ ...claims });
-    if (consume) this.#authorizations.set(verified, { token, now });
+    if (consume) this.#authorizations.set(verified, { token, now: consumedAt });
     return verified;
   }
 
@@ -538,8 +540,12 @@ export class ReceiptChain {
       if (signatureAlgorithm !== "Ed25519") return false;
 
       const identity = receipt.workloadIdentity;
-      if (identity.cardId !== receipt.fromCardId) return false;
-      if (keyId(identity.publicKey) !== identity.keyId) return false;
+      if (!identity || identity.cardId !== receipt.fromCardId) return false;
+      try {
+        if (keyId(identity.publicKey) !== identity.keyId) return false;
+      } catch {
+        return false;
+      }
 
       if (
         !verifyEd25519({

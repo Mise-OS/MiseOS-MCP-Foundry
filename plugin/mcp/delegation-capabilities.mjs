@@ -143,6 +143,8 @@ export class DelegationCapabilityAuthority {
   }
 
   verify(token, expected = {}, { consume = false, now = Date.now() } = {}) {
+    const consumedAt = consume ? Date.now() : null;
+    if (consume) now = consumedAt;
     this.#pruneConsumed();
     if (!Number.isFinite(now)) throw new DelegationCapabilityError("Invalid verification time.");
     const { header, claims, signature, signingInput } = this.inspect(token);
@@ -189,7 +191,7 @@ export class DelegationCapabilityAuthority {
       this.#consumed.set(claims.jti, expires);
     }
     const verified = Object.freeze({ ...claims });
-    if (consume) this.#authorizations.set(verified, { token, now });
+    if (consume) this.#authorizations.set(verified, { token, now: consumedAt });
     return verified;
   }
 

@@ -103,7 +103,11 @@ export class Ed25519WorkloadIdentityRegistry {
 
   verify({ descriptor, payload, signature }) {
     if (!descriptor || descriptor.algorithm !== "Ed25519") return false;
-    if (keyIdForPublicKey(descriptor.publicKey) !== descriptor.keyId) return false;
+    try {
+      if (keyIdForPublicKey(descriptor.publicKey) !== descriptor.keyId) return false;
+    } catch {
+      return false;
+    }
     return verifyEd25519({ publicKey: descriptor.publicKey, payload, signature });
   }
 

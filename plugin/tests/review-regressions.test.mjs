@@ -30,6 +30,54 @@ for (const plugin of [true, false]) {
     return { identities, authority, scope, chain, event };
   }
 
+  function resign(receipt, identities, changes) {
+    const { receiptHash: _hash, signature: _signature, signatureAlgorithm, ...body } = receipt;
+    Object.assign(body, changes);
+    for (const key of Object.keys(body)) {
+      if (body[key] === undefined) delete body[key];
+    }
+    const receiptHash = sha256(body);
+    return {
+      ...body, receiptHash, signatureAlgorithm,
+      signature: identities.sign({ workloadId: receipt.workloadIdentity.workloadId, payload: receiptHash }),
+    };
+  }
+
+  test(`${label}: rejects future-iat tokens and restores the test clock`, async (t) => {
+    const originalNow = Date.now;
+    await t.test("local and external verifiers reject future and expired signatures", (t) => {
+      const issuedAt = 1_800_000_000_000;
+      t.mock.method(Date, "now", () => issuedAt);
+      const { authority, scope } = fixture();
+      const token = authority.issue(scope);
+      const expires = issuedAt + 1000;
+      for (const now of [issuedAt - 1, expires, expires + 1]) {
+        assert.throws(() => authority.verify(token, {}, { now }), /not currently valid|expired|not yet valid/);
+        const external = plugin
+          ? DelegationCapabilityAuthority.verifyWithAuthority(token, authority.descriptor, {}, { now })
+          : DelegationAuthority.verifyExternal(token, authority.descriptor, {}, now);
+        assert.equal(external, false);
+      }
+    });
+    assert.strictEqual(Date.now, originalNow);
+  });
+
+  test(`${label}: consumption proof ignores caller-supplied historical time`, (t) => {
+    const issuedAt = 1_800_000_000_000;
+    t.mock.method(Date, "now", () => issuedAt);
+    const { authority, scope } = fixture();
+    const token = authority.issue(scope);
+    const consumedAt = issuedAt + 100;
+    Date.now.mock.mockImplementation(() => consumedAt);
+    const claims = authority.verify(token, {}, { consume: true, now: issuedAt });
+    assert.equal(authority.authorizationTime(token, claims), consumedAt);
+
+    Date.now.mock.mockImplementation(() => issuedAt - 1);
+    const futureToken = authority.issue(scope);
+    Date.now.mock.mockImplementation(() => issuedAt - 2);
+    assert.throws(() => authority.verify(futureToken, {}, { consume: true, now: issuedAt }), /not currently valid|not yet valid/);
+  });
+
   test(`${label}: issuing requires complete one-hop scope`, () => {
     const { authority, scope } = fixture();
     for (const field of ["targetCardId", "runId", "hop", "memoryId", "inputHash", "previousReceiptHash"]) {
@@ -70,6 +118,17 @@ for (const plugin of [true, false]) {
     assert.throws(() => authority.verifyAndConsume(token), /consumed/);
   });
 
+  test(`${label}: malformed receipt public keys fail closed after re-signing`, () => {
+    const { authority, scope, chain, event, identities } = fixture();
+    const token = authority.issue(scope);
+    const receipts = [];
+    chain.append(receipts, event(token, authority.verifyAndConsume(token)));
+    const malformed = resign(receipts[0], identities, {
+      workloadIdentity: { ...receipts[0].workloadIdentity, publicKey: "invalid public key" },
+    });
+    assert.equal(chain.verify([malformed]), false);
+  });
+
   test(`${label}: every receipt event binding is verified before signing`, () => {
     const { authority, scope, chain, event } = fixture();
     const token = authority.issue(scope);
@@ -104,8 +163,10 @@ for (const plugin of [true, false]) {
     assert.equal(authority.consumedCount, 0);
     assert.throws(() => authority.verifyAndConsume(token), /expired|currently valid/);
     // Neither a forged authorization timestamp nor a missing timestamp is accepted.
-    assert.equal(chain.verify([{ ...receipts[0], authorizedAt: claims.exp }]), false);
-    assert.equal(chain.verify([{ ...receipts[0], authorizedAt: undefined }]), false);
+    for (const authorizedAt of [claims.exp, new Date(Date.parse(claims.iat) - 1).toISOString(), "invalid", undefined]) {
+      const altered = resign(receipts[0], chain.identities, { authorizedAt });
+      assert.equal(chain.verify([altered]), false);
+    }
   });
 }
 
@@ -130,4 +191,14 @@ test("orchestrator handles inference exceeding the capability TTL", async (t) =>
   const orchestrator = new CardTeamOrchestrator({ bot, delegationAuthority });
   const result = await orchestrator.run({ prompt: "review", team: ["mise-maestro", "mise-garde"] });
   assert.equal(result.receiptChainValid, true);
+});
+
+
+test("workload registry rejects malformed Ed25519 descriptors without throwing", () => {
+  const identities = new Ed25519WorkloadIdentityRegistry();
+  const descriptor = identities.ensureCard("mise-maestro");
+  assert.equal(identities.verify({
+    descriptor: { ...descriptor, publicKey: "invalid" },
+    payload: "test", signature: "invalid",
+  }), false);
 });

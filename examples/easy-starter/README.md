@@ -63,7 +63,7 @@ Mise Sommelier
 Human Pass
 ```
 
-Every transition is bound to the source workload, destination workload, run, hop, memory object, input hash, and previous receipt hash.
+Every card-to-card transition is bound to the source workload, destination workload, run, hop, memory object, input hash, and previous receipt hash. The final transition targets Human Pass with audience `human-pass`, rather than a destination workload identity.
 
 ## Security boundary
 
