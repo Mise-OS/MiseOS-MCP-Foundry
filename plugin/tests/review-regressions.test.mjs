@@ -1,16 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Ed25519WorkloadIdentityRegistry } from "../mcp/workload-identities.mjs";
+import { Ed25519ControllerIdentity, Ed25519WorkloadIdentityRegistry, stableJson } from "../mcp/workload-identities.mjs";
 import { DelegationCapabilityAuthority } from "../mcp/delegation-capabilities.mjs";
 import { EvidenceReceiptChain } from "../mcp/evidence-receipts.mjs";
 import { CardTeamOrchestrator } from "../mcp/card-teams.mjs";
-import { WorkloadRegistry, DelegationAuthority, ReceiptChain, sha256 } from "../../examples/easy-starter/src/miseos.mjs";
+import { ControllerIdentity, WorkloadRegistry, DelegationAuthority, ReceiptChain, sha256 } from "../../examples/easy-starter/src/miseos.mjs";
 
 for (const plugin of [true, false]) {
   const label = plugin ? "plugin" : "starter";
   function fixture() {
     const identities = plugin ? new Ed25519WorkloadIdentityRegistry() : new WorkloadRegistry();
-    const authority = plugin ? new DelegationCapabilityAuthority({ defaultTtlMs: 1000 }) : new DelegationAuthority({ ttlMs: 1000 });
+    const controller = plugin ? new Ed25519ControllerIdentity() : new ControllerIdentity();
+    const authority = plugin ? new DelegationCapabilityAuthority({ controller, defaultTtlMs: 1000 }) : new DelegationAuthority({ controller, ttlMs: 1000 });
     const subject = identities.ensureCard("mise-maestro");
     const target = identities.ensureCard("mise-garde");
     const chain = plugin ? new EvidenceReceiptChain({ identities, delegationAuthority: authority }) : new ReceiptChain({ identities, authority });
@@ -27,7 +28,7 @@ for (const plugin of [true, false]) {
         ...(plugin ? { authorization: { token, claims } } : { token, claims }),
       };
     }
-    return { identities, authority, scope, chain, event };
+    return { identities, authority, scope, chain, event, controller };
   }
 
   function resign(receipt, identities, changes) {
@@ -146,6 +147,90 @@ for (const plugin of [true, false]) {
     assert.throws(() => chain.append([{ receiptHash: "a".repeat(64) }], validEvent), /does not authorize/);
     const wrongHop = authority.issue({ ...scope, hop: 2 });
     assert.throws(() => chain.append([], event(wrongHop, authority.verifyAndConsume(wrongHop))), /does not authorize/);
+  });
+
+  test(`${label}: receipt authorization is one-shot across chains and outputs`, () => {
+    const { authority, scope, chain, event, identities } = fixture();
+    const token = authority.issue(scope);
+    const claims = authority.verifyAndConsume(token);
+    const validEvent = event(token, claims);
+    const first = [];
+    chain.append(first, validEvent);
+    assert.equal(chain.verify(first), true);
+    const otherChain = plugin
+      ? new EvidenceReceiptChain({ identities, delegationAuthority: authority })
+      : new ReceiptChain({ identities, authority });
+    const second = [];
+    assert.throws(() => otherChain.append(second, { ...validEvent, output: "another output" }), /consumed/);
+    assert.equal(second.length, 0);
+    assert.equal(chain.verify(first), true);
+  });
+
+  test(`${label}: failed signing leaves receipt authorization available for retry`, (t) => {
+    const { authority, scope, chain, event, identities } = fixture();
+    const token = authority.issue(scope);
+    const claims = authority.verifyAndConsume(token);
+    const signing = t.mock.method(identities, "sign", () => { throw new Error("signing unavailable"); });
+    const receipts = [];
+    assert.throws(() => chain.append(receipts, event(token, claims)), /signing unavailable/);
+    assert.equal(receipts.length, 0);
+    signing.mock.restore();
+    chain.append(receipts, event(token, claims));
+    assert.equal(chain.verify(receipts), true);
+  });
+
+  test(`${label}: local and external verifiers agree on malformed signed claims`, (t) => {
+    const now = 1_800_000_000_000;
+    t.mock.method(Date, "now", () => now);
+    const { authority, scope, controller } = fixture();
+    const original = authority.issue(scope).split(".");
+    const baseClaims = JSON.parse(Buffer.from(original[1], "base64url").toString("utf8"));
+    const external = (token) => plugin
+      ? DelegationCapabilityAuthority.verifyWithAuthority(token, authority.descriptor, {}, { now })
+      : DelegationAuthority.verifyExternal(token, authority.descriptor, {}, now);
+    assert.ok(external(original.join(".")));
+    for (const changes of [
+      { iss: "other-controller" }, { issuerKeyId: "other-key" },
+      { schema: "wrong-schema" }, { capability: "repository.write" },
+      { runId: null }, { memoryId: null }, { hop: 0 }, { targetCardId: "" },
+      { inputHash: "invalid" }, { previousReceiptHash: "invalid" },
+      { iat: "invalid" }, { exp: "invalid" },
+      { iat: new Date(now + 1).toISOString() }, { exp: new Date(now).toISOString() },
+    ]) {
+      const body = Buffer.from(stableJson({ ...baseClaims, ...changes })).toString("base64url");
+      const input = `${original[0]}.${body}`;
+      const token = `${input}.${controller.sign(input)}`;
+      assert.throws(() => authority.verify(token), undefined, JSON.stringify(changes));
+      assert.equal(external(token), false, JSON.stringify(changes));
+    }
+  });
+
+  test(`${label}: missing memory binding is rejected without spending receipt proof`, () => {
+    const { authority, scope, chain, event } = fixture();
+    const token = authority.issue(scope);
+    const claims = authority.verifyAndConsume(token);
+    for (const inputMemoryId of [undefined, null]) {
+      const receipts = [];
+      assert.throws(() => chain.append(receipts, { ...event(token, claims), inputMemoryId }), /does not authorize/);
+      assert.equal(receipts.length, 0);
+    }
+    const receipts = [];
+    chain.append(receipts, event(token, claims));
+    assert.equal(chain.verify(receipts), true);
+  });
+
+  test(`${label}: backward clock adjustment preserves receipt causal time`, (t) => {
+    const consumedAt = 1_800_000_000_000;
+    t.mock.method(Date, "now", () => consumedAt);
+    const { authority, scope, chain, event } = fixture();
+    const token = authority.issue(scope);
+    const claims = authority.verifyAndConsume(token);
+    Date.now.mock.mockImplementation(() => consumedAt - 2000);
+    const receipts = [];
+    chain.append(receipts, event(token, claims));
+    assert.equal(chain.verify(receipts), true);
+    assert.equal(Date.parse(receipts[0].authorizedAt), consumedAt);
+    assert.equal(Date.parse(receipts[0].createdAt), consumedAt);
   });
 
   test(`${label}: replay entries expire while delayed receipts remain valid`, (t) => {

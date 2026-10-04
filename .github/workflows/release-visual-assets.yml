@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   package-visuals:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -45,6 +46,7 @@ jobs:
           if-no-files-found: error
 
   attach-release:
+    timeout-minutes: 10
     if: github.event_name == 'release'
     needs: package-visuals
     runs-on: ubuntu-latest

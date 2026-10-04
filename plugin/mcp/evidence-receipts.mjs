@@ -33,7 +33,7 @@ export class EvidenceReceiptChain {
       targetKeyId: event.toWorkloadKeyId ?? null,
       runId: event.runId,
       hop: receipts.length + 1,
-      memoryId: event.inputMemoryId,
+      memoryId: event.inputMemoryId ?? null,
       inputHash: sha256(event.input),
       previousReceiptHash,
     }, { now: authorizedAt });
@@ -64,11 +64,13 @@ export class EvidenceReceiptChain {
       authority: "advisory",
       writeAuthority: "none",
       authorizedAt: new Date(authorizedAt).toISOString(),
-      createdAt: new Date(Date.now()).toISOString(),
+      // Preserve causal ordering if the wall clock moves backward after consumption.
+      createdAt: new Date(Math.max(Date.now(), authorizedAt)).toISOString(),
     };
     const receiptHash = sha256(body);
     const signature = this.identities.sign({ workloadId: workloadIdentity.workloadId, payload: receiptHash });
     const receipt = Object.freeze({ ...body, receiptHash, signatureAlgorithm: "Ed25519", signature });
+    this.delegationAuthority.consumeReceiptAuthorization(event.authorization.token, event.authorization.claims);
     receipts.push(receipt);
     return receipt;
   }

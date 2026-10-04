@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const cli = fileURLToPath(new URL("../src/cli.mjs", import.meta.url));
 const cwd = fileURLToPath(new URL("../", import.meta.url));
 const env = { ...process.env };
-delete env.OPENROUTER_API_KEY;
+env.OPENROUTER_API_KEY = "";
 
 test("direct CLI failure is a clean message with exit status 1", () => {
   const result = spawnSync(process.execPath, [cli, "safe task"], { cwd, env, encoding: "utf8", timeout: 5000 });

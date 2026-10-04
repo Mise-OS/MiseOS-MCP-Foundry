@@ -58,6 +58,8 @@ The token is verified and consumed **before** model execution. Card consensus ne
 
 Every handoff then emits `miseos.card-handoff.receipt.v2`. The receipt contains the consumed capability token, its hash, the card's public workload identity, source/destination metadata, input/output hashes, model metadata, previous receipt hash, and an Ed25519 signature produced by the source card workload key. Raw prompt/output content is not copied into the receipt.
 
+Receipt signing spends the consumption proof once across chains sharing the authority. Missing input memory IDs are rejected before signing. `authorizedAt` records actual capability consumption; `createdAt` records emission time clamped to at least `authorizedAt` if the wall clock moves backward. Verification checks token expiry at consumption time, so delayed inference remains valid.
+
 This creates two independent proofs:
 
 ```text
