@@ -72,6 +72,11 @@ export class DelegationCapabilityAuthority {
     return proof.now;
   }
 
+  consumeReceiptAuthorization(token, claims) {
+    this.authorizationTime(token, claims);
+    this.#authorizations.delete(claims);
+  }
+
   get descriptor() {
     return { ...this.#controller.descriptor };
   }

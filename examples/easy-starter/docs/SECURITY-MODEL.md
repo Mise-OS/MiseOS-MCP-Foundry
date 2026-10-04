@@ -36,7 +36,11 @@ Each receipt records the one-hop capability hash, source workload identity, inpu
 
 Before signing, receipt emission verifies the capability signature and every event binding against the trusted controller. The authority retains consumption proof in a weak map keyed by the exact returned claims object; copying or inventing claims does not create authorization.
 
+Receipt signing spends that proof once, across all chains sharing the authority. Missing input memory IDs are rejected before signing. Failed validation or signing leaves the proof available for a corrected retry.
+
 New receipts record a signed `authorizedAt` timestamp from the successful consumption, distinct from `createdAt` after inference. Historical verification checks expiry at `authorizedAt`, so inference may finish after the capability expires. Earlier v2 receipts without this field retain the creation-time check. Receipt verification does not consume the token again.
+
+`createdAt` is the emission wall-clock time clamped to at least `authorizedAt`. A backward clock correction therefore preserves causal ordering; it does not backdate authorization or relax token expiry checks.
 
 ## Explicit denials
 

@@ -246,6 +246,11 @@ export class DelegationAuthority {
     return proof.now;
   }
 
+  consumeReceiptAuthorization(token, claims) {
+    this.authorizationTime(token, claims);
+    this.#authorizations.delete(claims);
+  }
+
   get descriptor() {
     return { ...this.#controller.descriptor };
   }
@@ -333,6 +338,9 @@ export class DelegationAuthority {
       throw new Error("Delegation capability invalid.");
     }
 
+    if (claims.iss !== this.descriptor.workloadId || claims.issuerKeyId !== this.descriptor.keyId) {
+      throw new Error("Delegation issuer does not match the trusted controller.");
+    }
     assertScope(claims);
     const issuedAt = Date.parse(claims.iat);
     const expiresAt = Date.parse(claims.exp);
@@ -481,7 +489,7 @@ export class ReceiptChain {
       targetKeyId: event.toWorkloadKeyId ?? null,
       runId: event.runId,
       hop: receipts.length + 1,
-      memoryId: event.inputMemoryId,
+      memoryId: event.inputMemoryId ?? null,
       inputHash: sha256(event.input),
       previousReceiptHash,
     }, authorizedAt);
@@ -507,7 +515,8 @@ export class ReceiptChain {
       authority: "advisory",
       writeAuthority: "none",
       authorizedAt: new Date(authorizedAt).toISOString(),
-      createdAt: new Date(Date.now()).toISOString(),
+      // Preserve causal ordering if the wall clock moves backward after consumption.
+      createdAt: new Date(Math.max(Date.now(), authorizedAt)).toISOString(),
     };
 
     const receiptHash = sha256(body);
@@ -522,6 +531,7 @@ export class ReceiptChain {
       signatureAlgorithm: "Ed25519",
       signature,
     });
+    this.authority.consumeReceiptAuthorization(event.token, event.claims);
     receipts.push(receipt);
     return receipt;
   }
