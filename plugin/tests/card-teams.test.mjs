@@ -80,7 +80,9 @@ test("default card team uses cryptographic one-hop delegation and purges ephemer
   assert.ok(result.receipts.every((receipt) => receipt.capabilityToken && receipt.capabilityTokenHash));
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE KEY/);
 
+  assert.equal(observed.length, result.stages.length);
   const modelView = JSON.stringify(observed);
+  assert.ok(result.receipts.every((receipt) => !modelView.includes(receipt.capabilityToken)));
   assert.doesNotMatch(modelView, /MISEOS-DELEGATION/);
   assert.doesNotMatch(modelView, /workload:\/\/miseos/);
   assert.doesNotMatch(modelView, /cap_[0-9a-f-]{8,}/i);

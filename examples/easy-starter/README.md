@@ -12,7 +12,7 @@ The starter is deliberately not a repository-writing agent. Its governing bounda
 - Controller-signed, destination-bound, one-use delegation capabilities
 - Run-scoped, card-scoped ephemeral memory
 - Hash-linked, card-signed handoff receipts
-- Offline deterministic demo mode
+- Offline demo mode (no live model; run identifiers and receipt hashes are randomly generated per run)
 - Optional OpenRouter free-model inference
 - Secret-like material rejected before model context
 - Explicit `authority: advisory` and `writeAuthority: none`
@@ -23,7 +23,7 @@ Requires Node.js 20+ and has no npm dependencies.
 
 ```bash
 cp .env.example .env
-# Add OPENROUTER_API_KEY to .env if you want live inference.
+# OPENROUTER_API_KEY is required for npm start; without a key the CLI exits with "OPENROUTER_API_KEY missing". Run the offline demo instead with: npm run demo
 npm start
 ```
 
@@ -63,7 +63,7 @@ Mise Sommelier
 Human Pass
 ```
 
-Every transition is bound to the source workload, destination workload, run, hop, memory object, input hash, and previous receipt hash.
+Every card-to-card transition is bound to the source workload, destination workload, run, hop, memory object, input hash, and previous receipt hash. The final transition targets Human Pass with audience `human-pass`, rather than a destination workload identity.
 
 ## Security boundary
 

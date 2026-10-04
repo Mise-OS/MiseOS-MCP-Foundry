@@ -27,23 +27,37 @@ async function execute(task) {
 const direct = process.argv.slice(2).join(" ").trim();
 
 if (direct) {
-  await execute(direct);
+  try {
+    await execute(direct);
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+  }
 } else {
   const rl = readline.createInterface({ input: stdin, output: stdout });
+  const close = () => rl.close();
+  rl.on("SIGINT", close);
+  process.on("SIGINT", close);
   console.log("MiseOS Easy Starter");
   console.log("Type a developer task or 'exit'.\n");
+  stdout.write("miseos> ");
   try {
-    while (true) {
-      const task = (await rl.question("miseos> ")).trim();
-      if (!task) continue;
+    // Async iteration settles on EOF and interface closure, unlike question().
+    for await (const line of rl) {
+      const task = line.trim();
       if (["exit", "quit", "q"].includes(task.toLowerCase())) break;
-      try {
-        await execute(task);
-      } catch (error) {
-        console.error(`\n${error.message}\n`);
+      if (task) {
+        try {
+          await execute(task);
+        } catch (error) {
+          console.error(`\n${error.message}\n`);
+        }
       }
+      stdout.write("miseos> ");
     }
   } finally {
+    process.off("SIGINT", close);
+    rl.off("SIGINT", close);
     rl.close();
   }
 }

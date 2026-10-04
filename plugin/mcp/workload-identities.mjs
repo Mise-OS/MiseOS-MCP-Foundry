@@ -25,7 +25,9 @@ export function sha256(value) {
 }
 
 function asPublicKey(publicKey) {
-  return publicKey?.type === "public" ? publicKey : createPublicKey(publicKey);
+  const key = publicKey?.type === "public" ? publicKey : createPublicKey(publicKey);
+  if (key.asymmetricKeyType !== "ed25519") throw new TypeError("An Ed25519 public key is required.");
+  return key;
 }
 
 function publicKeyPem(publicKey) {
@@ -101,7 +103,11 @@ export class Ed25519WorkloadIdentityRegistry {
 
   verify({ descriptor, payload, signature }) {
     if (!descriptor || descriptor.algorithm !== "Ed25519") return false;
-    if (keyIdForPublicKey(descriptor.publicKey) !== descriptor.keyId) return false;
+    try {
+      if (keyIdForPublicKey(descriptor.publicKey) !== descriptor.keyId) return false;
+    } catch {
+      return false;
+    }
     return verifyEd25519({ publicKey: descriptor.publicKey, payload, signature });
   }
 

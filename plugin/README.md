@@ -39,7 +39,7 @@ The default team is:
 Mise Maestro → Mise Garde → Mise Apprentice → Mise Sommelier → human pass
 ```
 
-A team run does **not** place all context into one shared conversation. The initial task capsule belongs only to Maestro; downstream cards receive only one-hop handoffs. All card memory is ephemeral and purged after the run.
+A team run does **not** place all context into one shared conversation. The initial task capsule belongs only to the first card; downstream cards receive only one-hop handoffs. All card memory is ephemeral and purged after the run.
 
 Each runtime card instance receives a separate Ed25519 workload identity. Private keys remain inside the trusted orchestration process and are never placed into model prompts, card memory, MCP responses, or OpenRouter payloads.
 

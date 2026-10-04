@@ -6,14 +6,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   package-visuals:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install SVG renderer
         run: |
@@ -36,7 +36,7 @@ jobs:
           (cd dist; zip -qr "${bundle}.zip" "${bundle}"; tar -czf "${bundle}.tar.gz" "${bundle}")
 
       - name: Preserve workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: visual-release-assets
           path: |
@@ -44,8 +44,19 @@ jobs:
             dist/*-visual-assets.tar.gz
           if-no-files-found: error
 
+  attach-release:
+    if: github.event_name == 'release'
+    needs: package-visuals
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download visual bundles
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: visual-release-assets
+          path: dist
       - name: Attach bundle to published GitHub Release
-        if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}

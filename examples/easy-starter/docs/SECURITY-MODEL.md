@@ -28,13 +28,15 @@ Each one-hop capability binds:
 - previous receipt hash
 - issued-at and expiry timestamps
 
-Capabilities are consumed once by the local authority instance.
+Capabilities are consumed once by the local authority instance. Expired replay entries are pruned during verification; expired tokens cannot be consumed again.
 
 ## Evidence receipt
 
 Each receipt records the one-hop capability hash, source workload identity, input/output hashes, previous receipt hash, and source workload signature. Verification fails when receipt content, chain linkage, card identity, capability binding, or signature is changed.
 
-Historical receipt verification evaluates token validity at the receipt creation time rather than at the current wall clock, allowing a short-lived execution capability to support long-lived evidence.
+Before signing, receipt emission verifies the capability signature and every event binding against the trusted controller. The authority retains consumption proof in a weak map keyed by the exact returned claims object; copying or inventing claims does not create authorization.
+
+New receipts record a signed `authorizedAt` timestamp from the successful consumption, distinct from `createdAt` after inference. Historical verification checks expiry at `authorizedAt`, so inference may finish after the capability expires. Earlier v2 receipts without this field retain the creation-time check. Receipt verification does not consume the token again.
 
 ## Explicit denials
 
