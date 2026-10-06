@@ -44,7 +44,14 @@
       "tar.gz"
     ],
     "checksums": "SHA256SUMS",
-    "attach_on": "release.published"
+    "attach_on": [
+      "release.published",
+      "workflow_dispatch.release_tag"
+    ],
+    "manual_dispatch": {
+      "blank": "artifact-only",
+      "release_tag": "validate existing release, check out the exact tag, and attach generated bundles"
+    }
   },
   "typography": {
     "rendering": "outlined SVG paths with accessible text labels",
