@@ -4,6 +4,11 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub Release tag to backfill. Leave blank to package only.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -28,13 +33,31 @@ jobs:
           repo="${GITHUB_REPOSITORY#*/}"
           bundle="${repo}-visual-assets"
           out="dist/${bundle}"
+
           mkdir -p "${out}/svg" "${out}/png"
           cp docs/assets/product/*.svg "${out}/svg/"
           cp docs/assets/product/manifest.json "${out}/"
-          if [[ -f docs/assets/product/codeart-demo.html ]]; then cp docs/assets/product/codeart-demo.html "${out}/"; fi
-          for svg in "${out}"/svg/*.svg; do name="$(basename "${svg}" .svg)"; rsvg-convert "${svg}" -o "${out}/png/${name}.png"; done
-          (cd "${out}"; find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum) > "${out}/SHA256SUMS"
-          (cd dist; zip -qr "${bundle}.zip" "${bundle}"; tar -czf "${bundle}.tar.gz" "${bundle}")
+          if [[ -f docs/assets/product/codeart-demo.html ]]; then
+            cp docs/assets/product/codeart-demo.html "${out}/"
+          fi
+
+          for svg in "${out}"/svg/*.svg; do
+            name="$(basename "${svg}" .svg)"
+            rsvg-convert "${svg}" -o "${out}/png/${name}.png"
+          done
+
+          (
+            cd "${out}"
+            find . -type f ! -name SHA256SUMS -print0 |
+              sort -z |
+              xargs -0 sha256sum
+          ) > "${out}/SHA256SUMS"
+
+          (
+            cd dist
+            zip -qr "${bundle}.zip" "${bundle}"
+            tar -czf "${bundle}.tar.gz" "${bundle}"
+          )
 
       - name: Preserve workflow artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -47,7 +70,7 @@ jobs:
 
   attach-release:
     timeout-minutes: 10
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || inputs.release_tag != ''
     needs: package-visuals
     runs-on: ubuntu-latest
     permissions:
@@ -58,10 +81,12 @@ jobs:
         with:
           name: visual-release-assets
           path: dist
-      - name: Attach bundle to published GitHub Release
+
+      - name: Attach bundle to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
         run: |
           set -euo pipefail
-          gh release upload "${RELEASE_TAG}" dist/*-visual-assets.zip dist/*-visual-assets.tar.gz --clobber
+          gh release view "${RELEASE_TAG}" >/dev/null
+          gh release upload "${RELEASE_TAG}"             dist/*-visual-assets.zip             dist/*-visual-assets.tar.gz             --clobber
