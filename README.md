@@ -103,7 +103,7 @@ The product graphics are versioned with the repository so README, launch, packag
 - [Visual asset manifest](docs/assets/product/manifest.json)
 - [Release graphics workflow](.github/workflows/release-visual-assets.yml)
 
-When a GitHub Release is published, the workflow renders PNG copies from the SVG masters, generates `SHA256SUMS`, builds ZIP and TAR archives, stores them as an Actions artifact, and attaches both archives to the same release. Manual runs package the assets without publishing a release.
+Published GitHub Releases automatically receive rendered PNG copies of the SVG masters, `SHA256SUMS`, and ZIP/TAR visual bundles. A manual dispatch with a blank `release_tag` is package-only and preserves the same bundles as a GitHub Actions artifact. To backfill an existing release, enter its exact tag; the workflow validates that release, checks out the tag, builds from that historical revision, and attaches the generated visual bundles.
 
 ## License
 
