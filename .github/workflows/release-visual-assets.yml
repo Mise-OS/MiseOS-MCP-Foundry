@@ -1,0 +1,160 @@
+name: Package visual release assets
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub Release tag to backfill. Leave blank to package only.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Resolve release source
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    outputs:
+      source_ref: ${{ steps.resolve.outputs.source_ref }}
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+      attach: ${{ steps.resolve.outputs.attach }}
+    steps:
+      - name: Resolve and validate source ref
+        id: resolve
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          DISPATCH_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+
+          trim() {
+            local value="$1"
+            value="${value#"${value%%[![:space:]]*}"}"
+            value="${value%"${value##*[![:space:]]}"}"
+            printf '%s' "$value"
+          }
+
+          if [[ "${EVENT_NAME}" == "release" ]]; then
+            release_tag="${EVENT_RELEASE_TAG}"
+            source_ref="${EVENT_RELEASE_TAG}"
+            attach=true
+          else
+            raw_tag="${INPUT_RELEASE_TAG}"
+            release_tag="$(trim "${raw_tag}")"
+
+            if [[ -n "${raw_tag}" && -z "${release_tag}" ]]; then
+              echo "::error::release_tag must not contain only whitespace."
+              exit 1
+            fi
+
+            if [[ -n "${release_tag}" ]]; then
+              source_ref="${release_tag}"
+              attach=true
+            else
+              source_ref="${DISPATCH_REF}"
+              attach=false
+            fi
+          fi
+
+          if [[ "${attach}" == "true" ]]; then
+            if [[ -z "${release_tag}" ]]; then
+              echo "::error::A release tag is required for attachment."
+              exit 1
+            fi
+            gh release view "${release_tag}" >/dev/null
+          fi
+
+          echo "source_ref=${source_ref}" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "attach=${attach}" >> "${GITHUB_OUTPUT}"
+
+  package-visuals:
+    name: Build visual bundle
+    needs: prepare
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_ref }}
+
+      - name: Install SVG renderer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librsvg2-bin zip
+
+      - name: Build visual asset bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="${GITHUB_REPOSITORY#*/}"
+          bundle="${repo}-visual-assets"
+          out="dist/${bundle}"
+
+          mkdir -p "${out}/svg" "${out}/png"
+          cp docs/assets/product/*.svg "${out}/svg/"
+          cp docs/assets/product/manifest.json "${out}/"
+          if [[ -f docs/assets/product/codeart-demo.html ]]; then
+            cp docs/assets/product/codeart-demo.html "${out}/"
+          fi
+
+          for svg in "${out}"/svg/*.svg; do
+            name="$(basename "${svg}" .svg)"
+            rsvg-convert "${svg}" -o "${out}/png/${name}.png"
+          done
+
+          (
+            cd "${out}"
+            find . -type f ! -name SHA256SUMS -print0 |
+              sort -z |
+              xargs -0 sha256sum
+          ) > "${out}/SHA256SUMS"
+
+          (
+            cd dist
+            zip -qr "${bundle}.zip" "${bundle}"
+            tar -czf "${bundle}.tar.gz" "${bundle}"
+          )
+
+      - name: Preserve workflow artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: visual-release-assets
+          path: |
+            dist/*-visual-assets.zip
+            dist/*-visual-assets.tar.gz
+          if-no-files-found: error
+
+  attach-release:
+    name: Attach visual bundle
+    if: needs.prepare.outputs.attach == 'true'
+    needs: [prepare, package-visuals]
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download visual bundles
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: visual-release-assets
+          path: dist
+
+      - name: Attach bundle to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "${RELEASE_TAG}"             dist/*-visual-assets.zip             dist/*-visual-assets.tar.gz             --clobber

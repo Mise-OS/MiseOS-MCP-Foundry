@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/product/readme-hero.svg" alt="MiseOS MCP Foundry — human-gated agent control plane" width="100%" />
+</p>
+
 # MiseOS MCP Foundry
 
 A kitchen control plane for composing micro-agents, binding MCP tools, and running a **gated copilot** over GitHub repos.
@@ -88,6 +92,18 @@ GitHub writes use the Contents + Pulls API. Without `GITHUB_TOKEN` the draft sta
 - Default branch is never pushed to
 - Evidence seals after every run
 - Shield Pup bark is the first deny
+
+## Visual assets & releases
+
+The product graphics are versioned with the repository so README, launch, package, and release surfaces stay traceable to source.
+
+- [README hero](docs/assets/product/readme-hero.svg)
+- [16:9 launch graphic](docs/assets/product/launch-16x9.svg)
+- [Interactive CodeArt trace demo](docs/assets/product/codeart-demo.html)
+- [Visual asset manifest](docs/assets/product/manifest.json)
+- [Release graphics workflow](.github/workflows/release-visual-assets.yml)
+
+Published GitHub Releases automatically receive rendered PNG copies of the SVG masters, `SHA256SUMS`, and ZIP/TAR visual bundles. A manual dispatch with a blank `release_tag` is package-only and preserves the same bundles as a GitHub Actions artifact. To backfill an existing release, enter its exact tag; the workflow validates that release, checks out the tag, builds from that historical revision, and attaches the generated visual bundles.
 
 ## License
 
